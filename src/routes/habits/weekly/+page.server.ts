@@ -45,34 +45,45 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   // Batch fetch all habit records for all habits in one query
   const habitIds = weeklyHabits.map(habit => habit.id);
   console.log('Weekly habit IDs:', habitIds);
+  
+  // Import the inArray operator
+  const { inArray } = await import('drizzle-orm');
 
-  // Get all records for the current week for all habits in a single query
+  // Get all records for the current week for all habits in a single query using proper inArray operator
   const allWeekRecords = await db
     .select()
     .from(habitRecords)
     .where(
       and(
-        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
+        inArray(habitRecords.habitId, habitIds),
         gte(habitRecords.date, currentWeek.start),
         lte(habitRecords.date, currentWeek.end)
       )
     );
   
+  console.log(`Weekly habits: Found ${allWeekRecords.length} records for current week`);
+  console.log(`Weekly habits: Date range: ${currentWeek.start} to ${currentWeek.end}`);
+  
   // Get momentum history records for all habits in a single query
   // Calculate the date 8 weeks ago
   const eightWeeksAgo = new Date();
   eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56); // 8 weeks * 7 days
+  const eightWeeksAgoStr = formatDateYYYYMMDD(eightWeeksAgo);
   
+  // Use the same inArray operator for momentum history records
   const allMomentumHistoryRecords = await db
     .select()
     .from(habitRecords)
     .where(
       and(
-        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
-        gte(habitRecords.date, formatDateYYYYMMDD(eightWeeksAgo))
+        inArray(habitRecords.habitId, habitIds),
+        gte(habitRecords.date, eightWeeksAgoStr)
       )
     )
     .orderBy(habitRecords.date);
+  
+  console.log(`Weekly habits: Found ${allMomentumHistoryRecords.length} history records for all habits`);
+  console.log(`Weekly habits: Date range: >= ${eightWeeksAgoStr}`);
   
   // Group records by habit ID for faster lookups
   const weekRecordsByHabitId = {};

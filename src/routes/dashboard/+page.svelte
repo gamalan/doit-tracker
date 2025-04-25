@@ -2,7 +2,8 @@
 	import { page } from '$app/stores';
 	import { enhance } from "$app/forms";
 	import { invalidate } from "$app/navigation";
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
+	import { browser } from '$app/environment';
 	
 	// Get session data from the server
 	$: session = $page.data.session;
@@ -20,84 +21,117 @@
 	let loadingTotalMomentum = true;
 	let loadingMomentumHistory = true;
 	
-	// Load all data in parallel after the component mounts
-	onMount(async () => {
-		// Fetch all data in parallel
-		const [dailyHabitsPromise, weeklyHabitsPromise, totalMomentumPromise, momentumHistoryPromise] = [
-			fetch('/api/dashboard/daily-habits'),
-			fetch('/api/dashboard/weekly-habits'),
-			fetch('/api/dashboard/total-momentum'),
-			fetch('/api/dashboard/momentum-history')
-		];
+	// Create a manual reload trigger
+	let reloadCount = 0;
+	
+	// Simple function to manually trigger data reload
+	function triggerDataReload() {
+		console.log("Triggering dashboard data reload");
+		reloadCount++;
+	}
+	
+	// Function to fetch all data - only called from onMount/browser
+	async function loadAllDashboardData() {
+		// Only run in browser environment
+		if (!browser) return;
 		
-		// Process total momentum (fastest, simplest data)
-		totalMomentumPromise
-			.then(response => response.json())
-			.then(data => {
+		console.log("Loading dashboard data in browser");
+		
+		try {
+			// Reset loading states
+			loadingDailyHabits = true;
+			loadingWeeklyHabits = true;
+			loadingTotalMomentum = true;
+			loadingMomentumHistory = true;
+			
+			// Total momentum (fastest, should load first)
+			const momentumResponse = await fetch('/api/dashboard/total-momentum');
+			if (momentumResponse.ok) {
+				const data = await momentumResponse.json();
 				totalMomentum = data.totalMomentum;
-				loadingTotalMomentum = false;
-			})
-			.catch(error => {
-				console.error("Error loading total momentum:", error);
-				loadingTotalMomentum = false;
-			});
-		
-		// Process daily habits
-		dailyHabitsPromise
-			.then(response => response.json())
-			.then(data => {
+			} else {
+				console.error("Error loading total momentum:", momentumResponse.statusText);
+			}
+			loadingTotalMomentum = false;
+			
+			// Daily habits
+			const dailyResponse = await fetch('/api/dashboard/daily-habits');
+			if (dailyResponse.ok) {
+				const data = await dailyResponse.json();
 				dailyHabits = data.dailyHabits || [];
-				loadingDailyHabits = false;
-			})
-			.catch(error => {
-				console.error("Error loading daily habits:", error);
-				loadingDailyHabits = false;
-			});
-		
-		// Process weekly habits
-		weeklyHabitsPromise
-			.then(response => response.json())
-			.then(data => {
+			} else {
+				console.error("Error loading daily habits:", dailyResponse.statusText);
+				dailyHabits = [];
+			}
+			loadingDailyHabits = false;
+			
+			// Weekly habits
+			const weeklyResponse = await fetch('/api/dashboard/weekly-habits');
+			if (weeklyResponse.ok) {
+				const data = await weeklyResponse.json();
 				weeklyHabits = data.weeklyHabits || [];
 				currentWeek = data.currentWeek || { start: '', end: '' };
-				loadingWeeklyHabits = false;
-			})
-			.catch(error => {
-				console.error("Error loading weekly habits:", error);
-				loadingWeeklyHabits = false;
-			});
-		
-		// Process momentum history (usually the slowest)
-		momentumHistoryPromise
-			.then(response => response.json())
-			.then(data => {
-				// Ensure we have valid momentum data before updating the state
+			} else {
+				console.error("Error loading weekly habits:", weeklyResponse.statusText);
+				weeklyHabits = [];
+			}
+			loadingWeeklyHabits = false;
+			
+			// Momentum history
+			const historyResponse = await fetch('/api/dashboard/momentum-history');
+			if (historyResponse.ok) {
+				const data = await historyResponse.json();
 				if (data.momentumHistory && Array.isArray(data.momentumHistory)) {
-					// Convert any null momentum values to 0 to ensure proper rendering
 					momentumHistory = data.momentumHistory.map(point => ({
 						date: point.date,
 						momentum: point.momentum !== null ? point.momentum : 0
 					}));
 					
-					// Debug log to see what data we're working with
-					console.log("Momentum history data:", momentumHistory);
-					
-					// Force chart width update after data is loaded
-					setTimeout(() => {
-						updateChartWidth();
-					}, 50);
+					console.log("Momentum history data loaded:", momentumHistory.length);
+					setTimeout(() => updateChartWidth(), 50);
 				} else {
-					console.error("Invalid momentum history data structure:", data);
 					momentumHistory = [];
 				}
-				loadingMomentumHistory = false;
-			})
-			.catch(error => {
-				console.error("Error loading momentum history:", error);
-				loadingMomentumHistory = false;
-			});
+			} else {
+				console.error("Error loading momentum history:", historyResponse.statusText);
+				momentumHistory = [];
+			}
+			loadingMomentumHistory = false;
+		} catch (error) {
+			console.error("Error loading dashboard data:", error);
+			// Set all loading states to false to avoid perpetual loading indicators
+			loadingDailyHabits = false;
+			loadingWeeklyHabits = false;
+			loadingTotalMomentum = false;
+			loadingMomentumHistory = false;
+		}
+	}
+	
+	// Monitor reload trigger only in browser context
+	$: {
+		if (browser && reloadCount >= 0) {
+			loadAllDashboardData();
+		}
+	}
+	
+	onMount(() => {
+		// Initial data load - will only run in browser
+		triggerDataReload();
+		
+		// Set up event listeners for chart resizing - only in browser
+		if (browser) {
+			updateChartWidth();
+			window.addEventListener('resize', updateChartWidth);
+		}
 	});
 	
+	onDestroy(() => {
+		// Clean up event listeners - only in browser
+		if (browser) {
+			window.removeEventListener('resize', updateChartWidth);
+		}
+	});
+
 	// Momentum utility functions
 	const getMomentumClass = (momentum: number) => {
 		if (momentum > 20) return "text-green-600";
@@ -165,6 +199,9 @@
 
 	// Responsive chart sizing
 	function updateChartWidth() {
+		// Only run in browser
+		if (!browser) return;
+		
 		if (chartSvg) {
 			const container = chartSvg.parentElement;
 			if (container) {
@@ -172,12 +209,6 @@
 			}
 		}
 	}
-
-	onMount(() => {
-		updateChartWidth();
-		window.addEventListener('resize', updateChartWidth);
-		return () => window.removeEventListener('resize', updateChartWidth);
-	});
 
 	// Improved chart scale calculations
 	$: {
@@ -534,8 +565,12 @@
 											use:enhance={() => {
 												return async ({ result }) => {
 													if (result.type === 'success') {
+														// Manual reload to refresh all API data
+														await invalidate('app:habits');
+														await invalidate('daily-habits');
 														await invalidate('/dashboard');
 														await invalidate('/habits/daily');
+														triggerDataReload();
 													}
 												};
 											}}

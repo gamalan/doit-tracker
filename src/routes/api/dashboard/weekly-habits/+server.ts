@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { getUserHabits, getDateRangeForWeek, calculateWeeklyHabitMomentum } from '$lib/habits';
 import { getDb } from '$lib/db/client';
 import { habitRecords } from '$lib/db/schema';
-import { and, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, gte, lte } from 'drizzle-orm';
 
 export const GET = async ({ locals }) => {
   const session = await locals.auth();
@@ -39,23 +39,23 @@ export const GET = async ({ locals }) => {
   // Batch fetch all habit records for all habits in one query
   const habitIds = weeklyHabits.map(habit => habit.id);
   
-  // Get all records for the current week for all habits in a single query
-  const queriesRecord = db
-  .select()
-  .from(habitRecords)
-  .where(
-    and(
-      sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
-      gte(habitRecords.date, currentWeek.start),
-      lte(habitRecords.date, currentWeek.end)
-    )
-  );
+  // Import the inArray operator
+  const { inArray } = await import('drizzle-orm');
+  
+  // Get all records for the current week for all habits in a single query using proper inArray
   const allWeekRecords = habitIds.length > 0
-    ? await queriesRecord
+    ? await db
+        .select()
+        .from(habitRecords)
+        .where(
+          and(
+            inArray(habitRecords.habitId, habitIds),
+            gte(habitRecords.date, currentWeek.start),
+            lte(habitRecords.date, currentWeek.end)
+          )
+        )
     : [];
   
-  console.log(`Query ${queriesRecord.toSQL().sql} returned ${allWeekRecords.length} records`);
-  console.log(`Param ${queriesRecord.toSQL().params} returned ${allWeekRecords.length} records`);
   // Debug log to see what records we found
   console.log(`Found ${allWeekRecords.length} weekly habit records for ${habitIds.length} habits`);
   

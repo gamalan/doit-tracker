@@ -2,7 +2,7 @@ import { json } from '@sveltejs/kit';
 import { getUserHabits, getCurrentDateYYYYMMDD, calculateDailyHabitMomentum } from '$lib/habits';
 import { getDb } from '$lib/db/client';
 import { habitRecords } from '$lib/db/schema';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 export const GET = async ({ locals }) => {
   const session = await locals.auth();
@@ -35,14 +35,17 @@ export const GET = async ({ locals }) => {
   // Get all habit IDs for batch queries
   const habitIds = dailyHabits.map(habit => habit.id);
   
-  // Batch fetch all habit records for today in a single query
+  // Import the inArray operator
+  const { inArray } = await import('drizzle-orm');
+  
+  // Batch fetch all habit records for today in a single query using proper inArray
   const allTodayRecords = habitIds.length > 0 
     ? await db
         .select()
         .from(habitRecords)
         .where(
           and(
-            sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
+            inArray(habitRecords.habitId, habitIds),
             eq(habitRecords.date, today)
           )
         )

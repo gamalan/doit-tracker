@@ -245,6 +245,9 @@
                 newHabitName = "";
                 newHabitDescription = "";
                 formError = "";
+                // More comprehensive invalidation
+                await invalidate('app:habits');
+                await invalidate('daily-habits');
                 await invalidate('/habits/daily');
                 await invalidate('/dashboard');
               } else if (result.data?.error) {
@@ -468,11 +471,28 @@
             <form
               method="POST"
               action="?/trackHabit"
-              use:enhance={() => {
+              use:enhance={({ formElement }) => {
+                const habitId = formElement.elements.namedItem('habitId')?.value;
+                const completed = formElement.elements.namedItem('completed')?.value === 'true';
+                console.log(`[Form] Tracking habit ${habitId}: setting completed=${completed}`);
+                
                 return async ({ result }) => {
                   if (result.type === 'success') {
+                    const data = result.data;
+                    console.log('[Form] Habit tracking successful:', data);
+                    
+                    // Invalidate multiple dependency paths to ensure all data is refreshed
+                    await invalidate('app:habits');
+                    await invalidate('daily-habits');
+                    await invalidate('app:momentum'); 
                     await invalidate('/habits/daily');
                     await invalidate('/dashboard');
+                    
+                    // Force a hard reload to ensure the browser gets a completely fresh state
+                    console.log('[Form] Forcing page reload to ensure fresh data');
+                    window.location.reload();
+                  } else {
+                    console.error('[Form] Habit tracking error:', result);
                   }
                 };
               }}
@@ -513,6 +533,9 @@
               use:enhance={() => {
                 return async ({ result }) => {
                   if (result.type === 'success' && result.data?.success) {
+                    // More comprehensive invalidation
+                    await invalidate('app:habits');
+                    await invalidate('daily-habits');
                     await invalidate('/habits/daily');
                     await invalidate('/dashboard');
                   }

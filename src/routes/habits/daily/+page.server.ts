@@ -19,6 +19,8 @@ async function getMomentumHistory(habitId: string): Promise<any[]> {
   const today = getCurrentDateYYYYMMDD();
   const sevenDaysAgo = getDateSevenDaysAgo();
   
+  console.log(`Getting momentum history for habit ${habitId} from ${sevenDaysAgo} to ${today}`);
+  
   const records = await db
     .select()
     .from(habitRecords)
@@ -30,6 +32,8 @@ async function getMomentumHistory(habitId: string): Promise<any[]> {
       )
     );
     
+  console.log(`Found ${records.length} records for habit ${habitId}`);
+  
   // Create a full 7-day dataset with missing days as null momentum
   const momentumHistory: { date: string; momentum: number | null }[] = [];
   const dateMap = new Map(records.map(record => [record.date, record.momentum]));
@@ -39,9 +43,13 @@ async function getMomentumHistory(habitId: string): Promise<any[]> {
     const date = new Date();
     date.setDate(date.getDate() - i);
     const dateStr = date.toISOString().split('T')[0];
+    
+    const momentum = dateMap.has(dateStr) ? dateMap.get(dateStr) : null;
+    console.log(`Date ${dateStr} has momentum: ${momentum}`);
+    
     momentumHistory.push({
       date: dateStr,
-      momentum: dateMap.has(dateStr) ? dateMap.get(dateStr) : null
+      momentum: momentum
     });
   }
   
@@ -50,8 +58,9 @@ async function getMomentumHistory(habitId: string): Promise<any[]> {
 
 // Load the daily habits for the logged in user
 export const load: PageServerLoad = async ({ locals, depends }) => {
-  // Mark data dependencies explicitly
+  // Mark data dependencies explicitly with more specific tags
   depends('daily-habits');
+  depends('app:habits');
   
   const session = await locals.auth();
   
@@ -67,9 +76,11 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   
   // Get all daily habits for the user
   const dailyHabits = await getUserHabits(userId, 'daily');
+  console.log(`[Daily Habits] Loaded ${dailyHabits.length} daily habits for user ${userId}`);
   
-  // Current date for daily habit tracking
+  // Current date for daily habit tracking - ensure proper format
   const today = getCurrentDateYYYYMMDD();
+  console.log(`[Daily Habits] Current date: ${today}`);
   
   // Early return if no habits
   if (dailyHabits.length === 0) {
@@ -83,39 +94,87 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   // Get all habit IDs for batch queries
   const habitIds = dailyHabits.map(habit => habit.id);
   
-  // Batch fetch all habit records for today in a single query
+  // Force clean dates in the database objects
+  dailyHabits.forEach(habit => {
+    // Convert dates to strings for serialization
+    if (habit.createdAt) {
+      habit.createdAt = new Date(habit.createdAt);
+    }
+    if (habit.archivedAt) {
+      habit.archivedAt = new Date(habit.archivedAt);
+    }
+  });
+  
+  console.log(`[Daily Habits] Fetching today's records for ${habitIds.length} habits for date ${today}`);
+  
+  // Import the inArray operator
+  const { inArray } = await import('drizzle-orm');
+  
+  // Use proper DrizzleORM inArray operator for multiple habit IDs
   const allTodayRecords = await db
     .select()
     .from(habitRecords)
     .where(
       and(
-        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
+        inArray(habitRecords.habitId, habitIds),
         eq(habitRecords.date, today)
       )
     );
   
-  // Create a lookup map for faster access
+  console.log(`[Daily Habits] Found ${allTodayRecords.length} records for today (${today})`);
+  
+  // Add more detailed debug info to identify the issue
+  console.log('[Daily Habits] Query execution details:');
+  console.log(`Date filter: ${today}`);
+  console.log(`Habit IDs: ${habitIds.join(', ')}`);
+  
+  // Debug output of all today's records for verification
+  allTodayRecords.forEach(record => {
+    console.log(`[Daily Habits] Today's record: habitId=${record.habitId}, date=${record.date}, completed=${record.completed}, momentum=${record.momentum}`);
+  });
+  
+  // Create a lookup map for faster access - ensuring correct record mapping
   const todayRecordsByHabitId = {};
   allTodayRecords.forEach(record => {
-    todayRecordsByHabitId[record.habitId] = record;
+    // Make a clean copy of the record to avoid reference issues
+    const cleanRecord = {
+      id: record.id,
+      habitId: record.habitId,
+      userId: record.userId,
+      date: record.date ? record.date.split('T')[0] : record.date,
+      completed: record.completed,
+      momentum: record.momentum,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt
+    };
+    
+    console.log(`[Daily Habits] Mapped record for habit ${cleanRecord.habitId}: completed=${cleanRecord.completed}, momentum=${cleanRecord.momentum}`);
+    todayRecordsByHabitId[cleanRecord.habitId] = cleanRecord;
   });
   
   // Get momentum history records for all habits in a single query
   // For last 7 days
   const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6); // Include today and the past 6 days
   const sevenDaysAgoStr = formatDateYYYYMMDD(sevenDaysAgo);
   
+  console.log(`[Daily Habits] Fetching 7-day history from ${sevenDaysAgoStr} to ${today}`);
+  
+  // Use proper DrizzleORM inArray operator for momentum history records
   const allMomentumHistoryRecords = await db
     .select()
     .from(habitRecords)
     .where(
       and(
-        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
-        gte(habitRecords.date, sevenDaysAgoStr)
+        inArray(habitRecords.habitId, habitIds),
+        gte(habitRecords.date, sevenDaysAgoStr),
+        lte(habitRecords.date, today)
       )
     )
     .orderBy(habitRecords.date);
+  
+  console.log(`[Daily Habits] Found ${allMomentumHistoryRecords.length} history records for all habits`);
+  console.log(`[Daily Habits] Date range: ${sevenDaysAgoStr} to ${today}`);
   
   // Group momentum history by habit ID
   const momentumHistoryByHabitId = {};
@@ -128,7 +187,11 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   // Populate momentum history by habit ID
   allMomentumHistoryRecords.forEach(record => {
     if (momentumHistoryByHabitId[record.habitId]) {
-      momentumHistoryByHabitId[record.habitId].push(record);
+      momentumHistoryByHabitId[record.habitId].push({
+        ...record,
+        // Ensure date is properly formatted as YYYY-MM-DD
+        date: record.date ? record.date.split('T')[0] : record.date
+      });
     }
   });
   
@@ -138,6 +201,8 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       // Get today's record from our pre-fetched data
       const todayRecord = todayRecordsByHabitId[habit.id];
       
+      console.log(`[Daily Habits] Processing habit "${habit.name}": ${todayRecord ? 'has record for today' : 'no record for today'}`);
+      
       // Calculate fresh momentum (this is still expensive but necessary for accuracy)
       const currentMomentum = todayRecord?.momentum || await calculateDailyHabitMomentum(
         habit.id,
@@ -145,6 +210,8 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         today,
         todayRecord?.completed || 0
       );
+      
+      console.log(`[Daily Habits] Current momentum for "${habit.name}": ${currentMomentum}`);
       
       // Get momentum history from our pre-fetched data
       const habitMomentumHistory = momentumHistoryByHabitId[habit.id] || [];
@@ -155,9 +222,12 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         const dateStr = formatDateYYYYMMDD(date);
         const record = habitMomentumHistory.find(r => r.date === dateStr);
         
+        const momentum = record?.momentum ?? null;
+        console.log(`[Daily Habits] "${habit.name}" history for ${dateStr}: ${momentum}`);
+        
         return {
           date: dateStr,
-          momentum: record?.momentum || null
+          momentum: momentum
         };
       });
       
@@ -169,6 +239,8 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       };
     })
   );
+  
+  console.log(`[Daily Habits] Returning ${habitsWithRecords.length} habits with data`);
   
   return {
     habits: habitsWithRecords
@@ -270,6 +342,8 @@ export const actions: Actions = {
     const habitId = data.get('habitId')?.toString();
     const completed = data.get('completed') === 'true' ? 1 : 0;
     
+    console.log(`[TRACK] Tracking habit ${habitId}, completed=${completed}`);
+    
     if (!habitId) {
       return { success: false, error: 'Habit ID is required' };
     }
@@ -282,12 +356,18 @@ export const actions: Actions = {
       }
       
       const today = getCurrentDateYYYYMMDD();
+      console.log(`[TRACK] Today's date: ${today}`);
+      
+      // First get the existing record to log it
+      const existingRecord = await getHabitRecordForDate(habitId, today);
+      console.log(`[TRACK] Existing record:`, existingRecord);
       
       // Calculate momentum based on completion status
       const momentum = await calculateDailyHabitMomentum(habitId, session.user.id, today, completed);
+      console.log(`[TRACK] Calculated momentum: ${momentum}`);
       
       // Create or update the record for today
-      await createOrUpdateHabitRecord({
+      const updatedRecord = await createOrUpdateHabitRecord({
         habitId,
         userId: session.user.id,
         date: today,
@@ -295,9 +375,17 @@ export const actions: Actions = {
         momentum
       });
       
-      return { success: true, momentum };
+      console.log(`[TRACK] Updated record:`, updatedRecord);
+      
+      // Return the updated momentum value explicitly for client-side update
+      return { 
+        success: true, 
+        momentum,
+        completed,
+        updatedAt: new Date().toISOString()
+      };
     } catch (err) {
-      console.error('Error tracking habit:', err);
+      console.error('[TRACK] Error tracking habit:', err);
       return { success: false, error: 'Failed to track habit' };
     }
   }

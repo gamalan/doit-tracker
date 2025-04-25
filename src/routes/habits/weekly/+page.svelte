@@ -313,6 +313,9 @@
                 newHabitDescription = "";
                 newHabitTargetCount = 2;
                 formError = "";
+                // More comprehensive invalidation
+                await invalidate('app:habits');
+                await invalidate('weekly-habits');
                 await invalidate('/habits/weekly');
                 await invalidate('/dashboard');
               } else if (result.data?.error) {
@@ -586,10 +589,11 @@
                         
                         // Add more aggressive data invalidation
                         await invalidate('app:habits');
-                        await invalidate('weekly-habits');
-                        await invalidate('dashboard');
+                        await invalidate('weekly-habits'); 
+                        await invalidate('/habits/weekly');
+                        await invalidate('/dashboard');
                         
-                        // Force a hard refresh to ensure UI is updated
+                        // Force page reload to ensure UI is updated
                         window.location.reload();
                       } else {
                         console.error('Weekly tracking error:', result);
@@ -630,6 +634,9 @@
               use:enhance={() => {
                 return async ({ result }) => {
                   if (result.type === 'success' && result.data?.success) {
+                    // More comprehensive invalidation
+                    await invalidate('app:habits');
+                    await invalidate('weekly-habits'); 
                     await invalidate('/habits/weekly');
                     await invalidate('/dashboard');
                   }

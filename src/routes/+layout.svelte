@@ -117,9 +117,16 @@
 
 	<footer class="border-t border-gray-200 bg-gray-100">
 		<div class="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
-			<p class="text-center text-sm text-gray-500">
-				© {new Date().getFullYear()} DoIt Tracker - A guilt-free habit tracker
-			</p>
+			<div class="flex flex-col md:flex-row justify-between items-center">
+				<p class="text-sm text-gray-500">
+					© {new Date().getFullYear()} DoIt Tracker - A guilt-free habit tracker
+				</p>
+				<div class="mt-2 md:mt-0">
+					<a href="https://utas.me/barebearfoot-gan" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium" target="_blank" rel="noopener noreferrer">
+						Contact
+					</a>
+				</div>
+			</div>
 		</div>
 	</footer>
 </div>

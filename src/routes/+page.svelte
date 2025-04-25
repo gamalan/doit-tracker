@@ -179,18 +179,4 @@
       {/if}
     </div>
   </section>
-
-  <!-- Footer Section -->
-  <footer class="py-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto mt-8 border-t border-gray-200">
-    <div class="flex flex-col md:flex-row justify-between items-center">
-      <div class="mb-4 md:mb-0">
-        <p class="text-gray-500 text-sm">&copy; {new Date().getFullYear()} DoIt Tracker. All rights reserved.</p>
-      </div>
-      <div class="flex items-center space-x-4">
-        <a href="https://utas.me/barebearfoot-gan" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium" target="_blank" rel="noopener noreferrer">
-          Contact
-        </a>
-      </div>
-    </div>
-  </footer>
 </div>

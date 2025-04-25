@@ -8,8 +8,9 @@ import { getUserById } from '$lib/db/user';
 
 // Load the weekly habits for the logged in user
 export const load: PageServerLoad = async ({ locals, depends }) => {
-  // Mark data dependencies explicitly
+  // Mark data dependencies explicitly with more specific tags
   depends('weekly-habits');
+  depends('app:habits');
   
   const session = await locals.auth();
   
@@ -25,9 +26,11 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   
   // Get all weekly habits for the user
   const weeklyHabits = await getUserHabits(userId, 'weekly');
+  console.log(`Loaded ${weeklyHabits.length} weekly habits for user ${userId}`);
   
   // Get current week's date range
   const currentWeek = getDateRangeForWeek();
+  console.log('Current week range:', currentWeek);
   
   const db = getDb();
   
@@ -41,7 +44,8 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   
   // Batch fetch all habit records for all habits in one query
   const habitIds = weeklyHabits.map(habit => habit.id);
-  
+  console.log('Weekly habit IDs:', habitIds);
+
   // Get all records for the current week for all habits in a single query
   const allWeekRecords = await db
     .select()
@@ -98,7 +102,19 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   const habitsWithRecords = await Promise.all(
     weeklyHabits.map(async (habit) => {
       // Get this habit's week records from our pre-fetched data
-      const records = weekRecordsByHabitId[habit.id] || [];
+      let records = weekRecordsByHabitId[habit.id] || [];
+      
+      // Ensure date is properly formatted for ALL records - critical fix
+      records = records.map(record => ({
+        ...record,
+        date: record.date ? record.date.split('T')[0] : record.date
+      }));
+      
+      // Debug logging for records
+      console.log(`Weekly habit ${habit.name} (${habit.id}) has ${records.length} records this week:`);
+      records.forEach(record => {
+        console.log(`Record: date=${record.date}, completed=${record.completed}, momentum=${record.momentum}`);
+      });
       
       // Count completions
       const completions = records.reduce((sum, record) => sum + record.completed, 0);
@@ -109,7 +125,6 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       )[0] || null;
       
       // Calculate fresh momentum for display
-      // This is still an expensive operation, but necessary for accuracy
       const currentMomentum = await calculateWeeklyHabitMomentum(
         habit,
         userId,
@@ -120,11 +135,16 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       // Process momentum history using pre-fetched data
       const habitMomentumRecords = momentumHistoryByHabitId[habit.id] || [];
       
+      // Format momentum history records too
+      const formattedMomentumRecords = habitMomentumRecords.map(record => ({
+        ...record,
+        date: record.date ? record.date.split('T')[0] : record.date
+      }));
+      
       // Group records by week to get a single data point per week
       const weeklyMomentumMap = new Map();
       
-      habitMomentumRecords.forEach(record => {
-        // Get the start of the week for this record
+      formattedMomentumRecords.forEach(record => {
         const recordDate = new Date(record.date);
         const weekStart = new Date(recordDate);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
@@ -261,16 +281,33 @@ export const actions: Actions = {
   
   // Track a weekly habit (mark as complete for today)
   trackHabit: async ({ request, locals }) => {
+    console.log('WEEKLY TRACKING: Starting habit tracking action');
+    
     const session = await locals.auth();
     if (!session || !session.user?.id) {
+      console.error('WEEKLY TRACKING: Unauthorized - no session or user ID');
       throw error(401, 'Unauthorized');
     }
     
+    const userId = session.user.id;
+    console.log(`WEEKLY TRACKING: User ID: ${userId}`);
+    
     const data = await request.formData();
     const habitId = data.get('habitId')?.toString();
-    const date = data.get('date')?.toString() || formatDateYYYYMMDD(new Date());
+    
+    // Always standardize the date to YYYY-MM-DD format
+    let dateFromForm = data.get('date')?.toString();
+    if (!dateFromForm) {
+      dateFromForm = formatDateYYYYMMDD(new Date());
+    }
+    
+    // Ensure the date is in YYYY-MM-DD format
+    const date = dateFromForm.split('T')[0]; // Remove any time component
+    
+    console.log(`WEEKLY TRACKING: Habit ID: ${habitId}, Standardized Date: ${date}`);
     
     if (!habitId) {
+      console.error('WEEKLY TRACKING: Missing habit ID');
       return { success: false, error: 'Habit ID is required' };
     }
     
@@ -278,44 +315,92 @@ export const actions: Actions = {
       // Verify that this habit belongs to the user
       const habit = await getHabitById(habitId);
       if (!habit || habit.userId !== session.user.id) {
+        console.error('WEEKLY TRACKING: Habit not found or access denied');
         return { success: false, error: 'Habit not found or access denied' };
       }
       
-      // Check if a record already exists for this date
-      const existingRecord = await getHabitRecordForDate(habitId, date);
+      console.log(`WEEKLY TRACKING: Habit found: ${habit.name}`);
+      
+      const db = getDb();
+      
+      // Check if a record already exists for this date - use direct query with explicit format
+      const existingRecords = await db
+        .select()
+        .from(habitRecords)
+        .where(
+          and(
+            eq(habitRecords.habitId, habitId),
+            eq(habitRecords.date, date)
+          )
+        )
+        .limit(1);
+      
+      const existingRecord = existingRecords[0];
+      console.log(`WEEKLY TRACKING: Existing record found:`, existingRecord);
       
       // If record already exists and completed, we're toggling off
-      const completed = existingRecord?.completed ? 0 : 1;
+      const completed = existingRecord?.completed > 0 ? 0 : 1;
+      console.log(`WEEKLY TRACKING: Setting completed to: ${completed} (toggled from ${existingRecord?.completed})`);
       
       // Get current week date range for the selected date
       const currentWeek = getDateRangeForWeek(new Date(date));
+      console.log(`WEEKLY TRACKING: Current week: ${currentWeek.start} to ${currentWeek.end}`);
       
       // Calculate momentum based on all completions in the week
       const momentum = await calculateWeeklyHabitMomentum(
         habit,
-        session.user.id,
+        userId,
         currentWeek.start,
         currentWeek.end
       );
       
-      // Log calculated momentum for debugging
-      console.log(`Calculated momentum for habit ${habit.name}: ${momentum}`);
+      console.log(`WEEKLY TRACKING: Calculated momentum for habit ${habit.name}: ${momentum}`);
       
       // Create or update the record for this date
-      await createOrUpdateHabitRecord({
-        habitId,
-        userId: session.user.id,
-        date,
-        completed,
-        momentum
-      });
+      let recordResult;
+      
+      if (existingRecord) {
+        // Update the existing record
+        const [updated] = await db
+          .update(habitRecords)
+          .set({ 
+            completed, 
+            momentum,
+            updatedAt: new Date()
+          })
+          .where(
+            and(
+              eq(habitRecords.id, existingRecord.id),
+              eq(habitRecords.habitId, habitId)
+            )
+          )
+          .returning();
+        
+        recordResult = updated;
+        console.log('WEEKLY TRACKING: Updated record:', recordResult);
+      } else {
+        // Create a new record
+        const [newRecord] = await db
+          .insert(habitRecords)
+          .values({
+            id: habitId + "-" + date, // Use a deterministic ID 
+            habitId,
+            userId,
+            date,
+            completed,
+            momentum,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          })
+          .returning();
+        
+        recordResult = newRecord;
+        console.log('WEEKLY TRACKING: Created new record:', recordResult);
+      }
       
       // For weekly habits, we need to update ALL records for this week with the new momentum
       // This ensures consistency in momentum across the week
-      const db = getDb();
-      
-      // Update all records for this habit in the current week
-      await db
+      const updateResult = await db
         .update(habitRecords)
         .set({ momentum })
         .where(
@@ -326,10 +411,12 @@ export const actions: Actions = {
           )
         );
       
+      console.log('WEEKLY TRACKING: Updated all records for the week with new momentum:', updateResult);
+      
       return { success: true, completed, momentum };
     } catch (err) {
-      console.error('Error tracking habit:', err);
-      return { success: false, error: 'Failed to track habit' };
+      console.error('WEEKLY TRACKING Error:', err);
+      return { success: false, error: `Failed to track habit: ${err.message}` };
     }
   }
 };

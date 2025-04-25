@@ -1,6 +1,7 @@
 import { getDb } from './db/client';
 import { habits, habitRecords, users } from './db/schema';
 import { eq, and, sql, desc, gte, lte, lt } from 'drizzle-orm';
+import { nanoid } from 'nanoid';
 
 // Type definitions
 export type Habit = typeof habits.$inferSelect;
@@ -97,39 +98,103 @@ export async function archiveHabit(id: string): Promise<Habit | undefined> {
 }
 
 // Tracking records functions
-export async function getHabitRecordForDate(habitId: string, date: string): Promise<HabitRecord | undefined> {
-  const db = getDb();
-  const result = await db
-    .select()
-    .from(habitRecords)
-    .where(and(eq(habitRecords.habitId, habitId), eq(habitRecords.date, date)))
-    .limit(1);
-  return result[0];
+// Get a habit record for a specific date
+export async function getHabitRecordForDate(habitId: string, date: string): Promise<any | null> {
+  console.log(`Looking for habit record: habitId=${habitId}, date=${date}`);
+  
+  try {
+    const db = getDb();
+    const records = await db
+      .select()
+      .from(habitRecords)
+      .where(
+        and(
+          eq(habitRecords.habitId, habitId),
+          eq(habitRecords.date, date)
+        )
+      )
+      .limit(1);
+    
+    const record = records[0] || null;
+    console.log(`Found habit record for date ${date}:`, record);
+    return record;
+  } catch (error) {
+    console.error('Error getting habit record for date:', error);
+    return null;
+  }
 }
 
-export async function createOrUpdateHabitRecord(
-  recordData: NewHabitRecord
-): Promise<HabitRecord> {
-  const db = getDb();
+// Create or update a habit record for a specific date
+export async function createOrUpdateHabitRecord({ 
+  habitId, 
+  userId, 
+  date, 
+  completed = 1,
+  momentum = null 
+}: { 
+  habitId: string; 
+  userId: string; 
+  date: string; 
+  completed?: number;
+  momentum?: number | null;
+}): Promise<any> {
   
-  // Check if record already exists
-  const existingRecord = await getHabitRecordForDate(recordData.habitId, recordData.date);
+  console.log(`Creating/updating habit record: habitId=${habitId}, userId=${userId}, date=${date}, completed=${completed}, momentum=${momentum}`);
   
-  if (existingRecord) {
-    // Update existing record
-    const result = await db
-      .update(habitRecords)
-      .set(recordData)
-      .where(eq(habitRecords.id, existingRecord.id))
-      .returning();
-    return result[0];
-  } else {
-    // Create new record
-    const result = await db
-      .insert(habitRecords)
-      .values(recordData)
-      .returning();
-    return result[0];
+  // Standardize date format to YYYY-MM-DD to ensure consistency
+  const standardDate = date.split('T')[0];
+  
+  try {
+    const db = getDb();
+    
+    // Check if record already exists
+    const existingRecord = await getHabitRecordForDate(habitId, standardDate);
+    
+    if (existingRecord) {
+      console.log(`Updating existing record for ${standardDate}`);
+      
+      // Update existing record
+      const [updated] = await db
+        .update(habitRecords)
+        .set({ 
+          completed, 
+          momentum: momentum !== null ? momentum : existingRecord.momentum,
+          updatedAt: new Date()
+        })
+        .where(
+          and(
+            eq(habitRecords.habitId, habitId),
+            eq(habitRecords.date, standardDate)
+          )
+        )
+        .returning();
+      
+      console.log(`Updated record:`, updated);
+      return updated;
+    } else {
+      console.log(`Creating new record for ${standardDate}`);
+      
+      // Create new record
+      const [newRecord] = await db
+        .insert(habitRecords)
+        .values({
+          id: nanoid(),
+          habitId,
+          userId,
+          date: standardDate,
+          completed,
+          momentum: momentum || 0,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        })
+        .returning();
+      
+      console.log(`Created new record:`, newRecord);
+      return newRecord;
+    }
+  } catch (error) {
+    console.error('Error creating/updating habit record:', error);
+    throw error;
   }
 }
 

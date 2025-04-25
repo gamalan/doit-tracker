@@ -94,10 +94,38 @@
 
   // Find if a habit was completed on a specific date
   const isCompletedOnDate = (habit: any, dateStr: string): boolean => {
-    if (!habit.weekRecords) return false;
-    return habit.weekRecords.some((record: any) => 
-      record.date === dateStr && record.completed > 0
+    if (!habit.weekRecords) {
+      console.log(`No weekRecords for habit ${habit.name}`);
+      return false;
+    }
+    
+    // Standardize the date format for comparison (ensure YYYY-MM-DD format)
+    const standardDateStr = dateStr.split('T')[0];
+    
+    console.log(`Checking if habit ${habit.name} was completed on ${standardDateStr}`, habit.weekRecords);
+    
+    // Log all the record dates for debugging
+    console.log(`Available dates for ${habit.name}:`, 
+      habit.weekRecords.map(r => ({ 
+        date: r.date, 
+        standardized: r.date ? r.date.split('T')[0] : r.date,
+        completed: r.completed
+      }))
     );
+    
+    const isCompleted = habit.weekRecords.some((record: any) => {
+      // Standardize record date format too
+      const recordDateStr = record.date ? record.date.split('T')[0] : record.date;
+      const matches = recordDateStr === standardDateStr;
+      const isComplete = record.completed > 0;
+      
+      console.log(`Compare: [${recordDateStr}] vs [${standardDateStr}], Matches: ${matches}, Completed: ${isComplete}`);
+      
+      return matches && isComplete;
+    });
+    
+    console.log(`Habit ${habit.name} completed on ${standardDateStr}: ${isCompleted}`);
+    return isCompleted;
   };
 
   const getMomentumClass = (momentum: number) => {
@@ -547,11 +575,24 @@
                 <form
                   method="POST"
                   action="?/trackHabit"
-                  use:enhance={() => {
+                  use:enhance={(form) => {
+                    const habitId = form?.elements?.namedItem('habitId')?.value;
+                    const date = form?.elements?.namedItem('date')?.value;
+                    console.log('Submitting weekly tracking form', { habitId, date });
+                    
                     return async ({ result }) => {
                       if (result.type === 'success') {
-                        await invalidate('/habits/weekly');
-                        await invalidate('/dashboard');
+                        console.log('Weekly tracking success:', result);
+                        
+                        // Add more aggressive data invalidation
+                        await invalidate('app:habits');
+                        await invalidate('weekly-habits');
+                        await invalidate('dashboard');
+                        
+                        // Force a hard refresh to ensure UI is updated
+                        window.location.reload();
+                      } else {
+                        console.error('Weekly tracking error:', result);
                       }
                     };
                   }}
@@ -559,6 +600,7 @@
                 >
                   <input type="hidden" name="habitId" value={habit.id} />
                   <input type="hidden" name="date" value={dateStr} />
+                  <!-- No completed flag - the server will toggle it -->
                   
                   <button
                     type="submit"

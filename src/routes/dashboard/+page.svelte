@@ -4,14 +4,100 @@
 	import { invalidate } from "$app/navigation";
 	import { onMount } from 'svelte';
 	
-	// Get data from the server
+	// Get session data from the server
 	$: session = $page.data.session;
-	$: dailyHabits = ($page.data.dailyHabits || []).filter(h => h.type === 'daily');
-	$: weeklyHabits = ($page.data.weeklyHabits || []).filter(h => h.type === 'weekly');
-	$: totalMomentum = $page.data.totalMomentum || 0;
-	$: currentWeek = $page.data.currentWeek || { start: '', end: '' };
-	$: momentumHistory = $page.data.momentumHistory || [];
-
+	
+	// State for progressively loaded data
+	let dailyHabits = [];
+	let weeklyHabits = [];
+	let totalMomentum = 0;
+	let currentWeek = { start: '', end: '' };
+	let momentumHistory = [];
+	
+	// Loading states
+	let loadingDailyHabits = true;
+	let loadingWeeklyHabits = true;
+	let loadingTotalMomentum = true;
+	let loadingMomentumHistory = true;
+	
+	// Load all data in parallel after the component mounts
+	onMount(async () => {
+		// Fetch all data in parallel
+		const [dailyHabitsPromise, weeklyHabitsPromise, totalMomentumPromise, momentumHistoryPromise] = [
+			fetch('/api/dashboard/daily-habits'),
+			fetch('/api/dashboard/weekly-habits'),
+			fetch('/api/dashboard/total-momentum'),
+			fetch('/api/dashboard/momentum-history')
+		];
+		
+		// Process total momentum (fastest, simplest data)
+		totalMomentumPromise
+			.then(response => response.json())
+			.then(data => {
+				totalMomentum = data.totalMomentum;
+				loadingTotalMomentum = false;
+			})
+			.catch(error => {
+				console.error("Error loading total momentum:", error);
+				loadingTotalMomentum = false;
+			});
+		
+		// Process daily habits
+		dailyHabitsPromise
+			.then(response => response.json())
+			.then(data => {
+				dailyHabits = data.dailyHabits || [];
+				loadingDailyHabits = false;
+			})
+			.catch(error => {
+				console.error("Error loading daily habits:", error);
+				loadingDailyHabits = false;
+			});
+		
+		// Process weekly habits
+		weeklyHabitsPromise
+			.then(response => response.json())
+			.then(data => {
+				weeklyHabits = data.weeklyHabits || [];
+				currentWeek = data.currentWeek || { start: '', end: '' };
+				loadingWeeklyHabits = false;
+			})
+			.catch(error => {
+				console.error("Error loading weekly habits:", error);
+				loadingWeeklyHabits = false;
+			});
+		
+		// Process momentum history (usually the slowest)
+		momentumHistoryPromise
+			.then(response => response.json())
+			.then(data => {
+				// Ensure we have valid momentum data before updating the state
+				if (data.momentumHistory && Array.isArray(data.momentumHistory)) {
+					// Convert any null momentum values to 0 to ensure proper rendering
+					momentumHistory = data.momentumHistory.map(point => ({
+						date: point.date,
+						momentum: point.momentum !== null ? point.momentum : 0
+					}));
+					
+					// Debug log to see what data we're working with
+					console.log("Momentum history data:", momentumHistory);
+					
+					// Force chart width update after data is loaded
+					setTimeout(() => {
+						updateChartWidth();
+					}, 50);
+				} else {
+					console.error("Invalid momentum history data structure:", data);
+					momentumHistory = [];
+				}
+				loadingMomentumHistory = false;
+			})
+			.catch(error => {
+				console.error("Error loading momentum history:", error);
+				loadingMomentumHistory = false;
+			});
+	});
+	
 	// Momentum utility functions
 	const getMomentumClass = (momentum: number) => {
 		if (momentum > 20) return "text-green-600";
@@ -95,45 +181,64 @@
 
 	// Improved chart scale calculations
 	$: {
-		// Find raw min/max values
-		let rawMax = momentumHistory.length > 0 ? Math.max(...momentumHistory.map(d => d.momentum)) : 1;
-		let rawMin = momentumHistory.length > 0 ? Math.min(...momentumHistory.map(d => d.momentum)) : 0;
-		
-		// Apply minimum thresholds for better visualization
-		rawMax = Math.max(rawMax, 5); // Ensure we show at least 0-5 range for positive values
-		rawMin = Math.min(rawMin, -5); // Ensure we show at least 0 to -5 range for negative values
-		
-		// Add generous padding (30% on each side)
-		maxMomentum = rawMax + Math.abs(rawMax * 0.3);
-		minMomentum = rawMin - Math.abs(rawMin * 0.3);
-		
-		// Ensure zero is in the middle if we have both positive and negative values
-		if (rawMax > 0 && rawMin < 0) {
-			// Balance the chart around zero
-			const absMax = Math.max(Math.abs(rawMax), Math.abs(rawMin));
-			maxMomentum = absMax * 1.3; // Add padding
-			minMomentum = -absMax * 1.3; // Keep symmetric
+		if (momentumHistory && momentumHistory.length > 0) {
+			// Find raw min/max values
+			const validMomentumValues = momentumHistory
+				.map(d => d.momentum)
+				.filter(m => m !== null && m !== undefined);
+			
+			let rawMax = validMomentumValues.length > 0 ? Math.max(...validMomentumValues) : 5;
+			let rawMin = validMomentumValues.length > 0 ? Math.min(...validMomentumValues) : -5;
+			
+			// Apply minimum thresholds for better visualization
+			rawMax = Math.max(rawMax, 5); // Ensure we show at least 0-5 range for positive values
+			rawMin = Math.min(rawMin, -5); // Ensure we show at least 0 to -5 range for negative values
+			
+			// Add generous padding (30% on each side)
+			maxMomentum = rawMax + Math.abs(rawMax * 0.3);
+			minMomentum = rawMin - Math.abs(rawMin * 0.3);
+			
+			// Ensure zero is in the middle if we have both positive and negative values
+			if (rawMax > 0 && rawMin < 0) {
+				// Balance the chart around zero
+				const absMax = Math.max(Math.abs(rawMax), Math.abs(rawMin));
+				maxMomentum = absMax * 1.3; // Add padding
+				minMomentum = -absMax * 1.3; // Keep symmetric
+			}
+		} else {
+			// Default values if no data
+			maxMomentum = 10;
+			minMomentum = -10;
 		}
 	}
 
-	// Scale helpers
+	// Scale helpers - ensure we handle array bounds correctly
 	$: xScale = (index: number) => {
+		if (!momentumHistory || momentumHistory.length <= 1) return 0;
 		return index * (chartWidth / (momentumHistory.length - 1));
 	};
 
 	$: yScale = (value: number) => {
+		if (value === null || value === undefined) value = 0;
 		const range = maxMomentum - minMomentum;
+		if (range === 0) return chartHeight / 2; // Avoid division by zero
 		const ratio = (value - minMomentum) / range;
 		return chartHeight - (ratio * chartHeight);
 	};
-
+	
 	// Calculate zero line position
 	$: zeroLineY = yScale(0);
 
 	// Line generator
-	$: points = momentumHistory.length > 0 ? momentumHistory.map((point, i) => {
-		return `${xScale(i)},${yScale(point.momentum)}`;
-	}).join(' ') : '';
+	$: points = momentumHistory && momentumHistory.length > 1 
+		? momentumHistory.map((point, i) => {
+			// Ensure we have valid momentum values
+			const momentum = point.momentum !== null && point.momentum !== undefined 
+				? point.momentum 
+				: 0;
+			return `${xScale(i)},${yScale(momentum)}`;
+		}).join(' ') 
+		: '';
 
 	// Hover state
 	let hoveredPoint: { index: number, x: number, y: number, momentum: number, date: string } | null = null;
@@ -217,27 +322,43 @@
 	<div class="bg-white rounded-lg shadow-md p-6">
 		<h1 class="text-2xl font-bold text-gray-900 mb-4">Welcome, {session?.user?.name || 'User'}!</h1>
 		
+		<!-- Momentum Score Card - Loading State / Data Display -->
 		<div class="mb-8">
 			<h2 class="text-xl font-semibold text-gray-800 mb-2">Your Momentum Score</h2>
 			<div class="bg-gray-100 p-4 rounded-lg">
 				<div class="text-center">
-					<p class={`text-5xl font-bold ${getTotalMomentumClass(totalMomentum)}`}>{totalMomentum}</p>
-					{#if totalMomentum > 0}
-						<p class="text-sm text-gray-500 mt-1">Great progress! Keep building those habits.</p>
-					{:else if totalMomentum === 0}
-						<p class="text-sm text-gray-500 mt-1">Start building habits to increase your score.</p>
+					{#if loadingTotalMomentum}
+						<div class="animate-pulse flex justify-center">
+							<div class="h-12 w-20 bg-gray-300 rounded"></div>
+						</div>
+						<p class="text-sm text-gray-500 mt-1">Loading momentum score...</p>
 					{:else}
-						<p class="text-sm text-gray-500 mt-1">Time to get back on track with your habits!</p>
+						<p class={`text-5xl font-bold ${getTotalMomentumClass(totalMomentum)}`}>{totalMomentum}</p>
+						{#if totalMomentum > 0}
+							<p class="text-sm text-gray-500 mt-1">Great progress! Keep building those habits.</p>
+						{:else if totalMomentum === 0}
+							<p class="text-sm text-gray-500 mt-1">Start building habits to increase your score.</p>
+						{:else}
+							<p class="text-sm text-gray-500 mt-1">Time to get back on track with your habits!</p>
+						{/if}
 					{/if}
 				</div>
 			</div>
 		</div>
 		
-		<!-- Momentum History Chart (30-day rolling) -->
+		<!-- Momentum History Chart - Loading State / Data Display -->
 		<div class="mb-8">
 			<h2 class="text-xl font-semibold text-gray-800 mb-2">Momentum History (30 Days)</h2>
 			<div class="bg-gray-100 p-4 rounded-lg">
-				{#if momentumHistory && momentumHistory.length > 0}
+				{#if loadingMomentumHistory}
+					<div class="animate-pulse flex flex-col space-y-2 h-[200px] justify-center items-center">
+						<div class="w-full h-4 bg-gray-300 rounded"></div>
+						<div class="w-full h-4 bg-gray-300 rounded"></div>
+						<div class="w-full h-4 bg-gray-300 rounded"></div>
+						<div class="w-full h-4 bg-gray-300 rounded"></div>
+						<p class="text-sm text-gray-500">Loading momentum history...</p>
+					</div>
+				{:else if momentumHistory && momentumHistory.length > 0}
 					<div class="w-full relative" 
 						style="height: {chartHeight + chartMargin.top + chartMargin.bottom}px">
 						<svg 
@@ -372,73 +493,111 @@
 		</div>
 		
 		<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-			<!-- Daily Habits Summary -->
+			<!-- Daily Habits Summary - Loading State / Data Display -->
 			<div class="bg-indigo-50 p-4 rounded-lg">
 				<h3 class="text-lg font-medium text-indigo-700">Daily Habits</h3>
-				<div class="flex flex-col space-y-4 mt-3">
-					{#each dailyHabits.slice(0, 3) as habit}
-						<div class="bg-white p-3 rounded-md shadow-sm border border-indigo-100">
-							<div class="flex justify-between items-center">
-								<div class="flex-1">
-									<p class="font-medium text-gray-800">{habit.name}</p>
-									<div class="flex items-center mt-1">
-										<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.currentMomentum || 0)}`}>
-											{habit.currentMomentum || 0}
-										</span>
-										<span class="ml-2 text-xs text-gray-500">
-											{habit.todayRecord?.completed ? 'Completed today' : 'Not completed'}
-										</span>
+				{#if loadingDailyHabits}
+					<div class="flex flex-col space-y-4 mt-3">
+						{#each Array(3) as _, i}
+							<div class="animate-pulse bg-white p-3 rounded-md shadow-sm border border-indigo-100">
+								<div class="flex justify-between items-center">
+									<div class="flex-1">
+										<div class="h-4 bg-gray-300 rounded w-3/4 mb-2"></div>
+										<div class="h-3 bg-gray-200 rounded w-1/2"></div>
 									</div>
+									<div class="h-8 w-16 bg-gray-300 rounded"></div>
 								</div>
-								
-								{#if !habit.todayRecord?.completed}
-									<form
-										method="POST"
-										action="/habits/daily?/trackHabit"
-										use:enhance={() => {
-											return async ({ result }) => {
-												if (result.type === 'success') {
-													await invalidate('/dashboard');
-													await invalidate('/habits/daily');
-												}
-											};
-										}}
-									>
-										<input type="hidden" name="habitId" value={habit.id} />
-										<input type="hidden" name="completed" value="true" />
-										<button
-											type="submit"
-											class="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
-										>
-											Track
-										</button>
-									</form>
-								{/if}
 							</div>
-						</div>
-					{/each}
-				</div>
-				{#if dailyHabits.length > 3}
-					<a href="/habits/daily" class="text-sm font-medium text-indigo-600 hover:text-indigo-900">
-						View all {dailyHabits.length} habits →
-					</a>
+						{/each}
+					</div>
+				{:else if dailyHabits.length > 0}
+					<div class="flex flex-col space-y-4 mt-3">
+						{#each dailyHabits.slice(0, 3) as habit}
+							<div class="bg-white p-3 rounded-md shadow-sm border border-indigo-100">
+								<div class="flex justify-between items-center">
+									<div class="flex-1">
+										<p class="font-medium text-gray-800">{habit.name}</p>
+										<div class="flex items-center mt-1">
+											<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.currentMomentum || 0)}`}>
+												{habit.currentMomentum || 0}
+											</span>
+											<span class="ml-2 text-xs text-gray-500">
+												{habit.todayRecord?.completed ? 'Completed today' : 'Not completed'}
+											</span>
+										</div>
+									</div>
+									
+									{#if !habit.todayRecord?.completed}
+										<form
+											method="POST"
+											action="/habits/daily?/trackHabit"
+											use:enhance={() => {
+												return async ({ result }) => {
+													if (result.type === 'success') {
+														await invalidate('/dashboard');
+														await invalidate('/habits/daily');
+													}
+												};
+											}}
+										>
+											<input type="hidden" name="habitId" value={habit.id} />
+											<input type="hidden" name="completed" value="true" />
+											<button
+												type="submit"
+												class="inline-flex items-center px-2 py-1 border border-transparent text-xs font-medium rounded shadow-sm text-white bg-indigo-600 hover:bg-indigo-700"
+											>
+												Track
+											</button>
+										</form>
+									{/if}
+								</div>
+							</div>
+						{/each}
+					</div>
 				{:else}
-					<a href="/habits/daily" class="text-sm font-medium text-indigo-600 hover:text-indigo-900">
-						Manage habits →
-					</a>
+					<p class="text-gray-600 py-4 text-center">You haven't created any daily habits yet.</p>
+				{/if}
+				{#if !loadingDailyHabits}
+					{#if dailyHabits.length > 3}
+						<a href="/habits/daily" class="text-sm font-medium text-indigo-600 hover:text-indigo-900">
+							View all {dailyHabits.length} habits →
+						</a>
+					{:else}
+						<a href="/habits/daily" class="text-sm font-medium text-indigo-600 hover:text-indigo-900">
+							Manage habits →
+						</a>
+					{/if}
 				{/if}
 			</div>
 			
-			<!-- Weekly Habits Summary -->
+			<!-- Weekly Habits Summary section -->
 			<div class="bg-purple-50 p-4 rounded-lg">
 				<div class="flex justify-between items-center mb-3">
 					<h3 class="text-lg font-medium text-purple-700">Weekly Habits</h3>
-					<a href="/habits/weekly" class="text-xs text-purple-600 hover:text-purple-800 font-medium">
-						View All
-					</a>
+					{#if !loadingWeeklyHabits}
+						<a href="/habits/weekly" class="text-xs text-purple-600 hover:text-purple-800 font-medium">
+							View All
+						</a>
+					{/if}
 				</div>
 				
-				{#if weeklyHabits.length === 0}
+				{#if loadingWeeklyHabits}
+					<div class="space-y-3 mb-4">
+						{#each Array(3) as _, i}
+							<div class="animate-pulse bg-white p-3 rounded-md shadow-sm border border-purple-100">
+								<div class="flex justify-between items-start">
+									<div class="flex-1">
+										<div class="h-4 bg-gray-300 rounded w-3/4 mb-2"></div>
+										<div class="h-3 bg-gray-200 rounded w-1/2 mb-2"></div>
+									</div>
+									<div class="h-6 w-16 bg-gray-300 rounded"></div>
+								</div>
+								<!-- Skeleton progress bar -->
+								<div class="h-1.5 bg-gray-200 rounded-full overflow-hidden mt-2"></div>
+							</div>
+						{/each}
+					</div>
+				{:else if weeklyHabits.length === 0}
 					<p class="text-gray-600 mb-4">You haven't created any weekly habits yet.</p>
 					<a href="/habits/weekly" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500">
 						Create Weekly Habit
@@ -461,10 +620,16 @@
 									</div>
 									
 									<div class="text-xs text-center">
-										{#if habit.targetMet}
-											<span class="inline-flex items-center px-2 py-1 rounded bg-green-100 text-green-800">
-												Target met
-											</span>
+										{#if habit.hasRecordsThisWeek || habit.completionsThisWeek > 0}
+											{#if habit.targetMet}
+												<span class="inline-flex items-center px-2 py-1 rounded bg-green-100 text-green-800">
+													Target met
+												</span>
+											{:else}
+												<span class="inline-flex items-center px-2 py-1 rounded bg-yellow-100 text-yellow-800">
+													In progress
+												</span>
+											{/if}
 										{:else}
 											<a 
 												href="/habits/weekly" 
@@ -479,7 +644,7 @@
 								<!-- Simple progress bar -->
 								<div class="h-1.5 bg-gray-200 rounded-full overflow-hidden mt-2">
 									<div 
-										class={`h-full ${habit.targetMet ? 'bg-green-500' : 'bg-purple-500'}`} 
+										class={`h-full ${habit.targetMet ? 'bg-green-500' : (habit.hasRecordsThisWeek || habit.completionsThisWeek > 0) ? 'bg-yellow-500' : 'bg-purple-500'}`} 
 										style="width: {Math.min(100, (habit.completionsThisWeek / (habit.targetCount || 2)) * 100)}%"
 									></div>
 								</div>

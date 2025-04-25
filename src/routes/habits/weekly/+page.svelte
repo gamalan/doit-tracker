@@ -194,9 +194,9 @@
             
             <!-- Momentum badge -->
             <span 
-              class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMomentumClass(habit.latestRecord?.momentum || 0)}`}
+              class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMomentumClass(habit.currentMomentum || 0)}`}
             >
-              {habit.latestRecord?.momentum || 0}
+              {habit.currentMomentum || 0}
             </span>
           </div>
           

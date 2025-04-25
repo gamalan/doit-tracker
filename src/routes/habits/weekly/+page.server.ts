@@ -3,7 +3,7 @@ import type { PageServerLoad } from './$types';
 import { getUserHabits, createHabit, getHabitById, archiveHabit, getDateRangeForWeek, createOrUpdateHabitRecord, calculateWeeklyHabitMomentum, getHabitRecordForDate, formatDateYYYYMMDD } from '$lib/habits';
 import { getDb } from '$lib/db/client';
 import { habitRecords } from '$lib/db/schema';
-import { and, eq, gte, lte } from 'drizzle-orm';
+import { and, eq, gte, lte, sql, lt } from 'drizzle-orm';
 import { getUserById } from '$lib/db/user';
 
 // Debug function to help troubleshoot user ID issues
@@ -13,7 +13,7 @@ function logDebug(phase: string, data: any) {
 
 // Load the weekly habits for the logged in user
 export const load: PageServerLoad = async ({ locals }) => {
-  const session = await locals.getSession();
+  const session = await locals.auth();
   
   if (!session) {
     throw redirect(303, '/login');
@@ -33,7 +33,7 @@ export const load: PageServerLoad = async ({ locals }) => {
   
   const db = getDb();
   
-  // For each habit, get this week's records
+  // For each habit, get this week's records and calculate current momentum
   const habitsWithRecords = await Promise.all(
     weeklyHabits.map(async (habit) => {
       // Get all records for this habit in the current week
@@ -56,12 +56,21 @@ export const load: PageServerLoad = async ({ locals }) => {
         new Date(b.date).getTime() - new Date(a.date).getTime()
       )[0] || null;
       
+      // Calculate fresh momentum for display
+      const currentMomentum = await calculateWeeklyHabitMomentum(
+        habit,
+        userId,
+        currentWeek.start,
+        currentWeek.end
+      );
+      
       return {
         ...habit,
         weekRecords: records,
         completionsThisWeek: completions,
         targetMet: completions >= (habit.targetCount || 2),
-        latestRecord
+        latestRecord,
+        currentMomentum // Add freshly calculated momentum
       };
     })
   );
@@ -75,7 +84,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
   // Create a new weekly habit
   createHabit: async ({ request, locals }) => {
-    const session = await locals.getSession();
+    const session = await locals.auth();
     if (!session || !session.user?.id) {
       throw error(401, 'Unauthorized');
     }
@@ -121,7 +130,7 @@ export const actions: Actions = {
   
   // Archive (soft delete) a habit
   archiveHabit: async ({ request, locals }) => {
-    const session = await locals.getSession();
+    const session = await locals.auth();
     if (!session || !session.user?.id) {
       throw error(401, 'Unauthorized');
     }
@@ -150,7 +159,7 @@ export const actions: Actions = {
   
   // Track a weekly habit (mark as complete for today)
   trackHabit: async ({ request, locals }) => {
-    const session = await locals.getSession();
+    const session = await locals.auth();
     if (!session || !session.user?.id) {
       throw error(401, 'Unauthorized');
     }
@@ -187,6 +196,9 @@ export const actions: Actions = {
         currentWeek.end
       );
       
+      // Log calculated momentum for debugging
+      console.log(`Calculated momentum for habit ${habit.name}: ${momentum}`);
+      
       // Create or update the record for this date
       await createOrUpdateHabitRecord({
         habitId,
@@ -198,32 +210,19 @@ export const actions: Actions = {
       
       // For weekly habits, we need to update ALL records for this week with the new momentum
       // This ensures consistency in momentum across the week
-      if (completed === 1) {
-        const db = getDb();
-        // Get all other records for this habit in the current week
-        const otherRecords = await db
-          .select()
-          .from(habitRecords)
-          .where(
-            and(
-              eq(habitRecords.habitId, habitId),
-              gte(habitRecords.date, currentWeek.start),
-              lte(habitRecords.date, currentWeek.end),
-              // Exclude the current record we just updated
-              sql`${habitRecords.date} <> ${date}`
-            )
-          );
-        
-        // Update momentum for all other completed records in this week
-        for (const record of otherRecords) {
-          if (record.completed > 0) {
-            await db
-              .update(habitRecords)
-              .set({ momentum })
-              .where(eq(habitRecords.id, record.id));
-          }
-        }
-      }
+      const db = getDb();
+      
+      // Update all records for this habit in the current week
+      await db
+        .update(habitRecords)
+        .set({ momentum })
+        .where(
+          and(
+            eq(habitRecords.habitId, habitId),
+            gte(habitRecords.date, currentWeek.start),
+            lte(habitRecords.date, currentWeek.end)
+          )
+        );
       
       return { success: true, completed, momentum };
     } catch (err) {

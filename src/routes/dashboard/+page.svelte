@@ -85,8 +85,8 @@
 									<div class="flex-1">
 										<p class="font-medium text-gray-800">{habit.name}</p>
 										<div class="flex items-center mt-1">
-											<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.todayRecord?.momentum || 0)}`}>
-												{habit.todayRecord?.momentum || 0}
+											<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.currentMomentum || 0)}`}>
+												{habit.currentMomentum || 0}
 											</span>
 											<span class="ml-2 text-xs text-gray-500">
 												{habit.todayRecord?.completed ? 'Completed today' : 'Not completed'}
@@ -119,13 +119,16 @@
 								</div>
 							</div>
 						{/each}
-						
-						{#if dailyHabits.length > 3}
-							<p class="text-xs text-center text-gray-500">
-								+ {dailyHabits.length - 3} more habit{dailyHabits.length - 3 > 1 ? 's' : ''}
-							</p>
-						{/if}
 					</div>
+					{#if dailyHabits.length > 3}
+						<a href="/habits/daily" class="text-sm font-medium text-indigo-600 hover:text-indigo-900">
+							View all {dailyHabits.length} habits →
+						</a>
+					{:else}
+						<a href="/habits/daily" class="text-sm font-medium text-indigo-600 hover:text-indigo-900">
+							Manage habits →
+						</a>
+					{/if}
 				{/if}
 			</div>
 			
@@ -133,9 +136,9 @@
 			<div class="bg-purple-50 p-4 rounded-lg">
 				<div class="flex justify-between items-center mb-3">
 					<h3 class="text-lg font-medium text-purple-700">Weekly Habits</h3>
-					<div class="text-xs text-purple-600">
-						<span class="font-medium">Week of:</span> {currentWeek.start ? formatDate(currentWeek.start) : ''}
-					</div>
+					<a href="/habits/weekly" class="text-xs text-purple-600 hover:text-purple-800 font-medium">
+						View All
+					</a>
 				</div>
 				
 				{#if weeklyHabits.length === 0}
@@ -151,8 +154,8 @@
 									<div class="flex-1">
 										<p class="font-medium text-gray-800">{habit.name}</p>
 										<div class="flex items-center mt-1">
-											<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.latestRecord?.momentum || 0)}`}>
-												{habit.latestRecord?.momentum || 0}
+											<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.currentMomentum || 0)}`}>
+												{habit.currentMomentum || 0}
 											</span>
 											<span class="ml-2 text-xs text-gray-500">
 												{habit.completionsThisWeek} / {habit.targetCount || 2} completed
@@ -180,60 +183,22 @@
 								<div class="h-1.5 bg-gray-200 rounded-full overflow-hidden mt-2">
 									<div 
 										class={`h-full ${habit.targetMet ? 'bg-green-500' : 'bg-purple-500'}`} 
-										style={`width: ${Math.min((habit.completionsThisWeek / (habit.targetCount || 2)) * 100, 100)}%`}
+										style="width: {Math.min(100, (habit.completionsThisWeek / (habit.targetCount || 2)) * 100)}%"
 									></div>
 								</div>
 							</div>
 						{/each}
-						
-						{#if weeklyHabits.length > 3}
-							<p class="text-xs text-center text-gray-500">
-								+ {weeklyHabits.length - 3} more habit{weeklyHabits.length - 3 > 1 ? 's' : ''}
-							</p>
-						{/if}
 					</div>
-					
-					<div class="text-right">
-						<a href="/habits/weekly" class="text-sm text-purple-600 hover:text-purple-800 font-medium">
-							View All
+					{#if weeklyHabits.length > 3}
+						<a href="/habits/weekly" class="text-sm font-medium text-purple-600 hover:text-purple-900">
+							View all {weeklyHabits.length} habits →
 						</a>
-					</div>
+					{:else}
+						<a href="/habits/weekly" class="text-sm font-medium text-purple-600 hover:text-purple-900">
+							Manage habits →
+						</a>
+					{/if}
 				{/if}
-			</div>
-		</div>
-	</div>
-	
-	<!-- Tips and Insights -->
-	<div class="bg-white rounded-lg shadow-md p-6">
-		<h2 class="text-xl font-semibold text-gray-800 mb-4">Habit Building Tips</h2>
-		
-		<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-			<div class="bg-blue-50 p-4 rounded-lg">
-				<h3 class="text-md font-medium text-blue-700 mb-2">Consistency is Key</h3>
-				<p class="text-sm text-gray-600">
-					Small, consistent actions build more momentum than occasional bursts of effort. Aim to complete your habits regularly, even when you don't feel motivated.
-				</p>
-			</div>
-			
-			<div class="bg-green-50 p-4 rounded-lg">
-				<h3 class="text-md font-medium text-green-700 mb-2">Celebrate Your Wins</h3>
-				<p class="text-sm text-gray-600">
-					Acknowledge your progress, no matter how small. Each completed habit is building your momentum and helping you create lasting change.
-				</p>
-			</div>
-			
-			<div class="bg-amber-50 p-4 rounded-lg">
-				<h3 class="text-md font-medium text-amber-700 mb-2">Be Guilt-Free</h3>
-				<p class="text-sm text-gray-600">
-					Missing a day doesn't mean failure. The guilt-free approach helps you bounce back quickly instead of giving up after a slip.
-				</p>
-			</div>
-			
-			<div class="bg-purple-50 p-4 rounded-lg">
-				<h3 class="text-md font-medium text-purple-700 mb-2">Track Your Progress</h3>
-				<p class="text-sm text-gray-600">
-					Seeing your momentum score grow is motivating. Regular tracking helps you spot patterns and make adjustments to your habits.
-				</p>
 			</div>
 		</div>
 	</div>

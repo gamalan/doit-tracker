@@ -2,15 +2,60 @@ import { redirect, error, type Actions } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { getUserHabits, createHabit, getHabitById, archiveHabit, getCurrentDateYYYYMMDD, createOrUpdateHabitRecord, calculateDailyHabitMomentum, getHabitRecordForDate } from '$lib/habits';
 import { getUserById } from '$lib/db/user';
+import { habitRecords } from '$lib/db/schema';
+import { eq, and, lte, gte } from 'drizzle-orm';
+import { getDb } from '$lib/db/client';
 
 // Debug function to help troubleshoot user ID issues
 function logDebug(phase: string, data: any) {
   console.log(`[DEBUG] ${phase}:`, JSON.stringify(data, null, 2));
 }
 
+// Function to get the date 7 days ago in YYYY-MM-DD format
+function getDateSevenDaysAgo(): string {
+  const date = new Date();
+  date.setDate(date.getDate() - 6); // -6 to include today (for a total of 7 days)
+  return date.toISOString().split('T')[0];
+}
+
+// Get momentum history for a habit for the last 7 days
+async function getMomentumHistory(habitId: string): Promise<any[]> {
+  const db = getDb();
+  const today = getCurrentDateYYYYMMDD();
+  const sevenDaysAgo = getDateSevenDaysAgo();
+  
+  const records = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        eq(habitRecords.habitId, habitId),
+        gte(habitRecords.date, sevenDaysAgo),
+        lte(habitRecords.date, today)
+      )
+    );
+    
+  // Create a full 7-day dataset with missing days as null momentum
+  const momentumHistory: { date: string; momentum: number | null }[] = [];
+  const dateMap = new Map(records.map(record => [record.date, record.momentum]));
+  
+  // Fill in dates for the last 7 days
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date();
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+    momentumHistory.push({
+      date: dateStr,
+      momentum: dateMap.has(dateStr) ? dateMap.get(dateStr) : null
+    });
+  }
+  
+  return momentumHistory;
+}
+
 // Load the daily habits for the logged in user
 export const load: PageServerLoad = async ({ locals }) => {
-  const session = await locals.getSession();
+  const session = await locals.auth();
   
   if (!session) {
     throw redirect(303, '/login');
@@ -30,9 +75,22 @@ export const load: PageServerLoad = async ({ locals }) => {
   const habitsWithRecords = await Promise.all(
     dailyHabits.map(async (habit) => {
       const record = await getHabitRecordForDate(habit.id, today);
+      const momentumHistory = await getMomentumHistory(habit.id);
+      
+      // Calculate fresh momentum for display
+      const completed = record?.completed || 0;
+      const currentMomentum = await calculateDailyHabitMomentum(
+        habit.id,
+        userId,
+        today,
+        completed
+      );
+      
       return {
         ...habit,
-        todayRecord: record || null
+        todayRecord: record || null,
+        momentumHistory,
+        currentMomentum
       };
     })
   );
@@ -45,7 +103,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
   // Create a new daily habit
   createHabit: async ({ request, locals }) => {
-    const session = await locals.getSession();
+    const session = await locals.auth();
     if (!session || !session.user?.id) {
       throw error(401, 'Unauthorized');
     }
@@ -86,7 +144,7 @@ export const actions: Actions = {
   
   // Archive (soft delete) a habit
   archiveHabit: async ({ request, locals }) => {
-    const session = await locals.getSession();
+    const session = await locals.auth();
     if (!session || !session.user?.id) {
       throw error(401, 'Unauthorized');
     }
@@ -115,7 +173,7 @@ export const actions: Actions = {
   
   // Track a daily habit (mark as complete/incomplete for today)
   trackHabit: async ({ request, locals }) => {
-    const session = await locals.getSession();
+    const session = await locals.auth();
     if (!session || !session.user?.id) {
       throw error(401, 'Unauthorized');
     }

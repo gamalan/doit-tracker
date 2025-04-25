@@ -1,18 +1,22 @@
-import { redirect } from '@sveltejs/kit';
+import { redirect, error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { getUserHabits, getUserTotalMomentum, getCurrentDateYYYYMMDD, getHabitRecordForDate, getDateRangeForWeek } from '$lib/habits';
+import { getUserHabits, getUserTotalMomentum, getCurrentDateYYYYMMDD, getHabitRecordForDate, getDateRangeForWeek, calculateDailyHabitMomentum, calculateWeeklyHabitMomentum } from '$lib/habits';
 import { getDb } from '$lib/db/client';
 import { habitRecords } from '$lib/db/schema';
 import { and, eq, gte, lte } from 'drizzle-orm';
 
 export const load: PageServerLoad = async ({ locals }) => {
-  const session = await locals.getSession();
+  const session = await locals.auth();
   
   if (!session) {
     throw redirect(303, '/login');
   }
   
   const userId = session.user?.id;
+  
+  if (!userId) {
+    throw error(401, 'User ID not found in session');
+  }
   
   // Get user's total momentum score
   const totalMomentum = await getUserTotalMomentum(userId);
@@ -28,9 +32,20 @@ export const load: PageServerLoad = async ({ locals }) => {
   const dailyHabitsWithRecords = await Promise.all(
     dailyHabits.map(async (habit) => {
       const record = await getHabitRecordForDate(habit.id, today);
+      
+      // Calculate fresh momentum for display
+      const completed = record?.completed || 0;
+      const currentMomentum = await calculateDailyHabitMomentum(
+        habit.id,
+        userId,
+        today,
+        completed
+      );
+      
       return {
         ...habit,
-        todayRecord: record || null
+        todayRecord: record || null,
+        currentMomentum
       };
     })
   );
@@ -61,11 +76,20 @@ export const load: PageServerLoad = async ({ locals }) => {
         new Date(b.date).getTime() - new Date(a.date).getTime()
       )[0] || null;
       
+      // Calculate fresh momentum for display
+      const currentMomentum = await calculateWeeklyHabitMomentum(
+        habit,
+        userId,
+        currentWeek.start,
+        currentWeek.end
+      );
+      
       return {
         ...habit,
         completionsThisWeek: completions,
         targetMet: completions >= (habit.targetCount || 2),
-        latestRecord
+        latestRecord,
+        currentMomentum
       };
     })
   );

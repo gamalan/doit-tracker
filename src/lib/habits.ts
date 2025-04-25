@@ -1,4 +1,3 @@
-import type { NewHabit } from './db/schema';
 import { getDb } from './db/client';
 import { habits, habitRecords, users } from './db/schema';
 import { eq, and, sql, desc, gte, lte, lt } from 'drizzle-orm';
@@ -7,6 +6,7 @@ import { eq, and, sql, desc, gte, lte, lt } from 'drizzle-orm';
 export type Habit = typeof habits.$inferSelect;
 export type HabitRecord = typeof habitRecords.$inferSelect;
 export type NewHabitRecord = typeof habitRecords.$inferInsert;
+export type NewHabit = typeof habits.$inferInsert;
 
 // Date utilities
 export function formatDateYYYYMMDD(date: Date): string {
@@ -215,8 +215,7 @@ export async function calculateWeeklyHabitMomentum(
   // Find if minimum target was reached
   const targetReached = completionsThisWeek >= (habit.targetCount || 2);
   
-  // Base momentum calculation is different for weekly habits
-  // We start with the number of completions
+  // Base momentum calculation - ALWAYS add +1 per completed tracking
   let momentum = completionsThisWeek;
   
   if (targetReached) {
@@ -256,8 +255,12 @@ export async function calculateWeeklyHabitMomentum(
       // Add another significant bonus to create a compounding effect
       momentum = Math.min(momentum + 10, 40); // Cap at +40
     }
-  } else if (completionsThisWeek === 0) {
-    // No completions this week - penalty
+  } else if (completionsThisWeek >= 1) {
+    // At least one tracking but didn't reach the target
+    // No additional logic needed - momentum is already set to completionsThisWeek above
+    // This ensures each tracking counts as +1 regardless of target
+  } else {
+    // No completions this week - reset momentum to 0 and potentially decrease
     // Get previous week's record to determine consecutive misses
     const previousWeekEnd = new Date(weekStartDate);
     previousWeekEnd.setDate(previousWeekEnd.getDate() - 1);
@@ -301,12 +304,13 @@ export async function calculateWeeklyHabitMomentum(
         // If previous momentum was already negative, decrease it further (consecutive misses)
         momentum = Math.max(lastRecord[0].momentum - 10, -40); // Cap at -40 with -10 decrements
       } else {
-        // First miss or no previous record
-        momentum = -10;
+        // First miss or no previous record - reset to 0 for the first miss
+        momentum = 0;
       }
     } else {
       // Previous week had completions but this week has none
-      momentum = -10;
+      // Reset to 0 according to requirements
+      momentum = 0;
     }
   }
   

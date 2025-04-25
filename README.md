@@ -51,3 +51,7 @@ A public demo version of the application is available for testing at:
 https://doit-tracker.empat.workers.dev/
 
 > Note: The project uses `@sveltejs/adapter-cloudflare` for deployment to Cloudflare Workers.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

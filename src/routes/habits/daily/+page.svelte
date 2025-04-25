@@ -1,4 +1,3 @@
-```svelte
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { page } from "$app/stores";
@@ -218,4 +217,3 @@
     </div>
   {/if}
 </div>
-```

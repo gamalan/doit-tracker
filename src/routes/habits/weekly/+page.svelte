@@ -2,6 +2,7 @@
   import { enhance } from "$app/forms";
   import { page } from "$app/stores";
   import { invalidateAll } from "$app/navigation";
+  import { onMount } from 'svelte';
 
   // Access the habits and current week data from the page load function
   $: habits = ($page.data.habits || []).filter(h => h.type === 'weekly');
@@ -12,6 +13,30 @@
   let newHabitName = "";
   let newHabitDescription = "";
   let newHabitTargetCount = 2; // Default minimum target is 2
+
+  // Temporary variable for SVG binding
+  let tempSvgElement: SVGElement | null = null;
+  
+  // Properly define the Svelte action for SVG binding
+  function bindSvgElement(node: SVGElement, habitId: string) {
+    // Store reference and initialize width
+    chartSvgElements.set(habitId, node);
+    updateChartWidth(habitId);
+    
+    return {
+      update(newHabitId: string) {
+        if (habitId !== newHabitId) {
+          chartSvgElements.delete(habitId);
+          chartSvgElements.set(newHabitId, node);
+          updateChartWidth(newHabitId);
+        }
+      },
+      destroy() {
+        chartSvgElements.delete(habitId);
+        chartWidths.delete(habitId);
+      }
+    };
+  }
 
   const toggleCreateForm = () => {
     showCreateForm = !showCreateForm;
@@ -38,6 +63,18 @@
     return date.toLocaleDateString('en-US', { 
       month: 'short',
       day: 'numeric'
+    });
+  };
+
+  // Format date for tooltip with more detail
+  const formatDateDetailed = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    // Format as "Weekday, Month Day, Year" (e.g., "Thursday, April 25, 2025")
+    return date.toLocaleDateString('en-US', { 
+      weekday: 'short',
+      month: 'long', 
+      day: 'numeric',
+      year: 'numeric'
     });
   };
 
@@ -92,88 +129,128 @@
     return "bg-gray-300";
   };
 
-  // Graph dimensions
-  const graphHeight = 50;
-  const graphWidth = 150;
-  const graphPadding = 5;
-  
-  // Function to create the SVG path for the momentum line
-  const createMomentumPath = (momentumHistory: {date: string, momentum: number | null}[]) => {
-    if (!momentumHistory || momentumHistory.length === 0) return "";
+  // Enhanced chart dimensions
+  const chartHeight = 80; 
+  const chartMargin = { top: 20, right: 10, bottom: 20, left: 10 };
+  let chartSvgElements = new Map();
+  let chartWidths = new Map();
+
+  // Function to update chart width based on container size
+  function updateChartWidth(habitId: string) {
+    const svg = chartSvgElements.get(habitId);
+    if (svg) {
+      const container = svg.parentElement;
+      if (container) {
+        const width = container.clientWidth - chartMargin.left - chartMargin.right;
+        chartWidths.set(habitId, width);
+        // Force svelte to update
+        chartWidths = chartWidths;
+      }
+    }
+  }
+
+  onMount(() => {
+    // Make charts responsive
+    const handleResize = () => {
+      habits.forEach(habit => updateChartWidth(habit.id));
+    };
     
-    // Filter out null momentum values but keep track of their positions
-    const validPoints = momentumHistory
-      .map((record, index) => ({ 
-        index, 
-        momentum: record.momentum === null ? null : record.momentum 
-      }))
-      .filter(p => p.momentum !== null);
+    // Initial update for all charts
+    setTimeout(() => {
+      habits.forEach(habit => updateChartWidth(habit.id));
+      // Force update reactivity
+      chartWidths = new Map(chartWidths);
+    }, 10);
     
-    if (validPoints.length === 0) return "";
+    window.addEventListener('resize', handleResize);
     
-    // Find min and max for scaling
-    const momentumValues = validPoints.map(p => p.momentum);
-    const minMomentum = Math.min(-1, ...momentumValues as number[]); // At least -1 for proper scaling
-    const maxMomentum = Math.max(1, ...momentumValues as number[]); // At least 1 for proper scaling
-    const range = maxMomentum - minMomentum;
+    return () => {
+      window.removeEventListener('resize', handleResize);
+    };
+  });
+
+  // Scale helpers
+  function xScale(index: number, totalPoints: number, width: number) {
+    return index * (width / (totalPoints - 1));
+  }
+
+  function yScale(value: number, minValue: number, maxValue: number) {
+    const range = maxValue - minValue;
+    const ratio = (value - minValue) / range;
+    return chartHeight - chartMargin.bottom - (ratio * (chartHeight - chartMargin.top - chartMargin.bottom));
+  }
+
+  // Get min/max momentum values for scaling
+  function getScalingValues(momentumHistory: {date: string, momentum: number | null}[]) {
+    if (!momentumHistory || !momentumHistory.length) {
+      return { minValue: -5, maxValue: 5 }; // Default range if no data
+    }
     
-    // Create the SVG path
-    const points = validPoints.map(point => {
-      const x = graphPadding + (point.index / (momentumHistory.length - 1)) * (graphWidth - 2 * graphPadding);
-      const normalizedMomentum = (point.momentum as number - minMomentum) / range;
-      const y = graphHeight - graphPadding - normalizedMomentum * (graphHeight - 2 * graphPadding);
-      return `${x},${y}`;
-    });
-    
-    return `M${points.join(" L")}`;
-  };
-  
-  // Function to create circle points for each data point
-  const createMomentumPoints = (momentumHistory: {date: string, momentum: number | null}[]) => {
-    if (!momentumHistory || momentumHistory.length === 0) return [];
-    
-    // Find min and max for scaling
-    const momentumValues = momentumHistory
+    const validValues = momentumHistory
       .map(record => record.momentum)
       .filter(m => m !== null) as number[];
     
-    if (momentumValues.length === 0) return [];
+    if (!validValues.length) {
+      return { minValue: -5, maxValue: 5 }; // Default range if all null
+    }
     
-    const minMomentum = Math.min(-1, ...momentumValues);
-    const maxMomentum = Math.max(1, ...momentumValues);
-    const range = maxMomentum - minMomentum;
+    let minValue = Math.min(0, ...validValues); // Ensure 0 is visible
+    let maxValue = Math.max(0, ...validValues); // Ensure 0 is visible
     
-    return momentumHistory.map((record, index) => {
-      if (record.momentum === null) return null;
-      
-      const x = graphPadding + (index / (momentumHistory.length - 1)) * (graphWidth - 2 * graphPadding);
-      const normalizedMomentum = (record.momentum - minMomentum) / range;
-      const y = graphHeight - graphPadding - normalizedMomentum * (graphHeight - 2 * graphPadding);
-      
-      return {
-        x,
-        y,
-        momentum: record.momentum,
-        date: record.date
-      };
-    }).filter(p => p !== null);
-  };
-  
-  // Draw the zero line position
-  const getZeroLineY = (momentumHistory: {date: string, momentum: number | null}[]) => {
-    const momentumValues = momentumHistory
-      .map(record => record.momentum)
-      .filter(m => m !== null) as number[];
+    // Add padding (20% on each side)
+    const padding = Math.max(1, (maxValue - minValue) * 0.2);
+    minValue = minValue - padding;
+    maxValue = maxValue + padding;
     
-    if (momentumValues.length === 0) return graphHeight / 2;
+    // Ensure minimum range if data is too flat
+    if (maxValue - minValue < 2) {
+      maxValue += 1;
+      minValue -= 1;
+    }
     
-    const minMomentum = Math.min(-1, ...momentumValues);
-    const maxMomentum = Math.max(1, ...momentumValues);
-    const range = maxMomentum - minMomentum;
+    return { minValue, maxValue };
+  }
+
+  // Hover state data for each habit chart
+  let hoveredPoints = new Map();
+
+  function handleMouseMove(event: MouseEvent, habit: any) {
+    if (!habit.momentumHistory || habit.momentumHistory.length === 0) return;
     
-    const normalizedZero = (0 - minMomentum) / range;
-    return graphHeight - graphPadding - normalizedZero * (graphHeight - 2 * graphPadding);
-  };
+    const habitId = habit.id;
+    const svg = chartSvgElements.get(habitId);
+    const chartWidth = chartWidths.get(habitId) || 100;
+    
+    if (!svg) return;
+    
+    const svgRect = svg.getBoundingClientRect();
+    const mouseX = event.clientX - svgRect.left - chartMargin.left;
+    
+    // Find closest point based on x position
+    const pointSpacing = chartWidth / (habit.momentumHistory.length - 1);
+    let index = Math.round(mouseX / pointSpacing);
+    
+    // Ensure index is within bounds
+    index = Math.max(0, Math.min(index, habit.momentumHistory.length - 1));
+    
+    const { minValue, maxValue } = getScalingValues(habit.momentumHistory);
+    const point = habit.momentumHistory[index];
+    
+    if (point.momentum !== null) {
+      hoveredPoints.set(habitId, {
+        index,
+        x: xScale(index, habit.momentumHistory.length, chartWidth),
+        y: yScale(point.momentum, minValue, maxValue),
+        momentum: point.momentum,
+        date: point.date
+      });
+    }
+  }
+
+  function handleMouseLeave(habitId: string) {
+    hoveredPoints.delete(habitId);
+    hoveredPoints = hoveredPoints; // Trigger reactivity
+  }
 </script>
 
 <div class="space-y-8">
@@ -303,59 +380,138 @@
             </span>
           </div>
           
-          <!-- Momentum Graph -->
+          <!-- Enhanced Momentum Line Chart -->
           {#if habit.momentumHistory && habit.momentumHistory.length > 0}
             <div class="my-3">
-              <div class="mb-1">
+              <div class="mb-1 flex justify-between">
                 <span class="text-xs font-medium text-gray-500">8-Week Momentum</span>
               </div>
               
-              <div class="relative">
-                <svg width={graphWidth} height={graphHeight} class="w-full">
-                  <!-- Zero reference line -->
-                  <line 
-                    x1={graphPadding} 
-                    y1={getZeroLineY(habit.momentumHistory)} 
-                    x2={graphWidth - graphPadding} 
-                    y2={getZeroLineY(habit.momentumHistory)} 
-                    stroke="#e5e7eb" 
-                    stroke-width="1" 
-                    stroke-dasharray="4" 
-                  />
-                  
-                  <!-- Momentum line -->
-                  {#if createMomentumPath(habit.momentumHistory)}
-                    <path 
-                      d={createMomentumPath(habit.momentumHistory)} 
-                      fill="none" 
-                      stroke="#8b5cf6" 
-                      stroke-width="2" 
-                      stroke-linejoin="round"
-                    />
-                  {/if}
-                  
-                  <!-- Data points -->
-                  {#each createMomentumPoints(habit.momentumHistory) as point}
-                    <circle 
-                      cx={point.x} 
-                      cy={point.y} 
-                      r="3" 
-                      fill="white" 
-                      stroke={getMomentumColor(point.momentum)} 
-                      stroke-width="2"
-                    >
-                      <title>{point.date}: {point.momentum}</title>
-                    </circle>
-                  {/each}
+              <div class="relative" style="height: {chartHeight}px;">
+                <svg 
+                  role="img"
+                  use:bindSvgElement={habit.id}
+                  width="100%" 
+                  height={chartHeight}
+                  on:mousemove={(e) => handleMouseMove(e, habit)} 
+                  on:mouseleave={() => handleMouseLeave(habit.id)}
+                  class="overflow-visible"
+                >
+                  <g transform="translate({chartMargin.left}, {chartMargin.top})">
+                    {#if chartWidths.has(habit.id) && chartWidths.get(habit.id) > 0}
+                      {@const habitId = habit.id}
+                      {@const chartWidth = chartWidths.get(habitId) || 0}
+                      {@const { minValue, maxValue } = getScalingValues(habit.momentumHistory)}
+                      {@const zeroLineY = yScale(0, minValue, maxValue)}
+                      
+                      <!-- Zero line -->
+                      <line 
+                        x1="0" 
+                        y1={zeroLineY - chartMargin.top} 
+                        x2={chartWidth} 
+                        y2={zeroLineY - chartMargin.top} 
+                        stroke="#e5e7eb" 
+                        stroke-width="1" 
+                        stroke-dasharray="4" 
+                      />
+                      
+                      <!-- Line connecting data points -->
+                      {#if habit.momentumHistory && habit.momentumHistory.length > 1}
+                        <polyline 
+                          points={habit.momentumHistory
+                            .map((point, i) => point.momentum !== null ? 
+                              `${xScale(i, habit.momentumHistory.length, chartWidth)},${yScale(point.momentum, minValue, maxValue) - chartMargin.top}` : '')
+                            .filter(Boolean)
+                            .join(' ')}
+                          fill="none" 
+                          stroke="#8b5cf6" 
+                          stroke-width="2" 
+                          stroke-linejoin="round"
+                          stroke-linecap="round"
+                        />
+                      
+                        <!-- Data points -->
+                        {#each habit.momentumHistory as point, i}
+                          {#if point.momentum !== null}
+                            <circle
+                              cx={xScale(i, habit.momentumHistory.length, chartWidth)}
+                              cy={yScale(point.momentum, minValue, maxValue) - chartMargin.top}
+                              r="3"
+                              fill="white"
+                              stroke={getMomentumColor(point.momentum)}
+                              stroke-width="2"
+                            />
+                          {/if}
+                        {/each}
+                      {/if}
+                      
+                      <!-- Hover effects -->
+                      {@const hoveredPoint = hoveredPoints.get(habitId)}
+                      {#if hoveredPoint}
+                        <line
+                          x1={hoveredPoint.x}
+                          y1="0"
+                          x2={hoveredPoint.x}
+                          y2={chartHeight - chartMargin.top - chartMargin.bottom}
+                          stroke="#9ca3af"
+                          stroke-width="1"
+                          stroke-dasharray="4 4"
+                        />
+                        
+                        <circle
+                          cx={hoveredPoint.x}
+                          cy={hoveredPoint.y - chartMargin.top}
+                          r="5"
+                          fill={getMomentumColor(hoveredPoint.momentum)}
+                          stroke="#ffffff"
+                          stroke-width="2"
+                        />
+                        
+                        <!-- Tooltip -->
+                        <rect
+                          x={Math.min(Math.max(hoveredPoint.x - 60, 0), chartWidth - 120)}
+                          y={Math.max(0, hoveredPoint.y - chartMargin.top - 45)}
+                          width="120"
+                          height="40"
+                          rx="4"
+                          fill="#111827"
+                          opacity="0.95"
+                        />
+                        
+                        <text
+                          x={Math.min(Math.max(hoveredPoint.x, 60), chartWidth - 60)}
+                          y={Math.max(15, hoveredPoint.y - chartMargin.top - 25)}
+                          text-anchor="middle"
+                          font-size="11"
+                          fill="#ffffff"
+                        >
+                          {formatDateDetailed(hoveredPoint.date)}
+                        </text>
+                        
+                        <text
+                          x={Math.min(Math.max(hoveredPoint.x, 60), chartWidth - 60)}
+                          y={Math.max(35, hoveredPoint.y - chartMargin.top - 5)}
+                          text-anchor="middle"
+                          font-size="12"
+                          font-weight="bold"
+                          fill="#ffffff"
+                        >
+                          Momentum: {hoveredPoint.momentum}
+                        </text>
+                      {/if}
+                    {/if}
+                  </g>
                 </svg>
               </div>
               
-              <!-- Show select dates to save space -->
-              <div class="flex justify-between text-xs text-gray-400 mt-1 px-1">
-                <span>{formatShortDate(habit.momentumHistory[0].date)}</span>
-                <span>{formatShortDate(habit.momentumHistory[3].date)}</span>
-                <span>{formatShortDate(habit.momentumHistory[7].date)}</span>
-              </div>
+              <!-- Date labels -->
+              {#if habit.momentumHistory && habit.momentumHistory.length > 2}
+                <div class="flex justify-between text-xs text-gray-400 mt-1 px-1">
+                  <span>{formatShortDate(habit.momentumHistory[0].date)}</span>
+                  <span>{formatShortDate(habit.momentumHistory[Math.floor(habit.momentumHistory.length / 2)].date)}</span>
+                  <span>{formatShortDate(habit.momentumHistory[habit.momentumHistory.length - 1].date)}</span>
+                </div>
+              {/if}
             </div>
           {/if}
           

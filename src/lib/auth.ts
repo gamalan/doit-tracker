@@ -100,8 +100,7 @@ export const { handle, signIn, signOut } = SvelteKitAuth(async (event) => {
         }
         return token;
       }
-    },
-    debug: true,
+    }
   }
   return authOptions
 })

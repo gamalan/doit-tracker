@@ -1,6 +1,6 @@
 import { redirect, error } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { getUserHabits, getUserTotalMomentum, getCurrentDateYYYYMMDD, getHabitRecordForDate, getDateRangeForWeek, calculateDailyHabitMomentum, calculateWeeklyHabitMomentum } from '$lib/habits';
+import { getUserHabits, getUserTotalMomentum, getCurrentDateYYYYMMDD, getHabitRecordForDate, getDateRangeForWeek, calculateDailyHabitMomentum, calculateWeeklyHabitMomentum, getMomentumHistory } from '$lib/habits';
 import { getDb } from '$lib/db/client';
 import { habitRecords } from '$lib/db/schema';
 import { and, eq, gte, lte } from 'drizzle-orm';
@@ -26,6 +26,9 @@ export const load: PageServerLoad = async ({ locals }) => {
   
   // Get weekly habits
   const weeklyHabits = await getUserHabits(userId, 'weekly');
+  
+  // Get momentum history for the past 30 days
+  const momentumHistory = await getMomentumHistory(userId, 30);
   
   // For daily habits, get today's records
   const today = getCurrentDateYYYYMMDD();
@@ -98,6 +101,7 @@ export const load: PageServerLoad = async ({ locals }) => {
     totalMomentum,
     dailyHabits: dailyHabitsWithRecords,
     weeklyHabits: weeklyHabitsWithRecords,
-    currentWeek
+    currentWeek,
+    momentumHistory
   };
 };

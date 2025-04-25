@@ -1,15 +1,10 @@
 import { redirect, error, type Actions } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { getUserHabits, createHabit, getHabitById, archiveHabit, getCurrentDateYYYYMMDD, createOrUpdateHabitRecord, calculateDailyHabitMomentum, getHabitRecordForDate } from '$lib/habits';
+import { getUserHabits, createHabit, getHabitById, archiveHabit, getCurrentDateYYYYMMDD, createOrUpdateHabitRecord, calculateDailyHabitMomentum, getHabitRecordForDate, formatDateYYYYMMDD } from '$lib/habits';
 import { getUserById } from '$lib/db/user';
 import { habitRecords } from '$lib/db/schema';
-import { eq, and, lte, gte } from 'drizzle-orm';
+import { eq, and, lte, gte, sql } from 'drizzle-orm';
 import { getDb } from '$lib/db/client';
-
-// Debug function to help troubleshoot user ID issues
-function logDebug(phase: string, data: any) {
-  console.log(`[DEBUG] ${phase}:`, JSON.stringify(data, null, 2));
-}
 
 // Function to get the date 7 days ago in YYYY-MM-DD format
 function getDateSevenDaysAgo(): string {
@@ -54,7 +49,10 @@ async function getMomentumHistory(habitId: string): Promise<any[]> {
 }
 
 // Load the daily habits for the logged in user
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, depends }) => {
+  // Mark data dependencies explicitly
+  depends('daily-habits');
+  
   const session = await locals.auth();
   
   if (!session) {
@@ -70,27 +68,104 @@ export const load: PageServerLoad = async ({ locals }) => {
   // Get all daily habits for the user
   const dailyHabits = await getUserHabits(userId, 'daily');
   
-  // For each habit, get today's record if it exists
+  // Current date for daily habit tracking
   const today = getCurrentDateYYYYMMDD();
+  
+  // Early return if no habits
+  if (dailyHabits.length === 0) {
+    return {
+      habits: []
+    };
+  }
+  
+  const db = getDb();
+  
+  // Get all habit IDs for batch queries
+  const habitIds = dailyHabits.map(habit => habit.id);
+  
+  // Batch fetch all habit records for today in a single query
+  const allTodayRecords = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
+        eq(habitRecords.date, today)
+      )
+    );
+  
+  // Create a lookup map for faster access
+  const todayRecordsByHabitId = {};
+  allTodayRecords.forEach(record => {
+    todayRecordsByHabitId[record.habitId] = record;
+  });
+  
+  // Get momentum history records for all habits in a single query
+  // For last 7 days
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const sevenDaysAgoStr = formatDateYYYYMMDD(sevenDaysAgo);
+  
+  const allMomentumHistoryRecords = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
+        gte(habitRecords.date, sevenDaysAgoStr)
+      )
+    )
+    .orderBy(habitRecords.date);
+  
+  // Group momentum history by habit ID
+  const momentumHistoryByHabitId = {};
+  
+  // Initialize with empty arrays
+  habitIds.forEach(id => {
+    momentumHistoryByHabitId[id] = [];
+  });
+  
+  // Populate momentum history by habit ID
+  allMomentumHistoryRecords.forEach(record => {
+    if (momentumHistoryByHabitId[record.habitId]) {
+      momentumHistoryByHabitId[record.habitId].push(record);
+    }
+  });
+  
+  // Process each habit with the pre-fetched data
   const habitsWithRecords = await Promise.all(
     dailyHabits.map(async (habit) => {
-      const record = await getHabitRecordForDate(habit.id, today);
-      const momentumHistory = await getMomentumHistory(habit.id);
+      // Get today's record from our pre-fetched data
+      const todayRecord = todayRecordsByHabitId[habit.id];
       
-      // Calculate fresh momentum for display
-      const completed = record?.completed || 0;
-      const currentMomentum = await calculateDailyHabitMomentum(
+      // Calculate fresh momentum (this is still expensive but necessary for accuracy)
+      const currentMomentum = todayRecord?.momentum || await calculateDailyHabitMomentum(
         habit.id,
         userId,
         today,
-        completed
+        todayRecord?.completed || 0
       );
+      
+      // Get momentum history from our pre-fetched data
+      const habitMomentumHistory = momentumHistoryByHabitId[habit.id] || [];
+      
+      // Process momentum history to ensure we have exactly 7 data points
+      const dates = generateDateRangeArray(sevenDaysAgo, new Date());
+      const momentumHistory = dates.map(date => {
+        const dateStr = formatDateYYYYMMDD(date);
+        const record = habitMomentumHistory.find(r => r.date === dateStr);
+        
+        return {
+          date: dateStr,
+          momentum: record?.momentum || null
+        };
+      });
       
       return {
         ...habit,
-        todayRecord: record || null,
-        momentumHistory,
-        currentMomentum
+        todayRecord: todayRecord || null,
+        currentMomentum,
+        momentumHistory
       };
     })
   );
@@ -99,6 +174,19 @@ export const load: PageServerLoad = async ({ locals }) => {
     habits: habitsWithRecords
   };
 };
+
+// Helper function to generate an array of dates (inclusive range)
+function generateDateRangeArray(startDate: Date, endDate: Date): Date[] {
+  const dates = [];
+  const currentDate = new Date(startDate);
+  
+  while (currentDate <= endDate) {
+    dates.push(new Date(currentDate));
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  
+  return dates;
+}
 
 export const actions: Actions = {
   // Create a new daily habit

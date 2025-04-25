@@ -6,13 +6,11 @@ import { habitRecords } from '$lib/db/schema';
 import { and, eq, gte, lte, sql, lt } from 'drizzle-orm';
 import { getUserById } from '$lib/db/user';
 
-// Debug function to help troubleshoot user ID issues
-function logDebug(phase: string, data: any) {
-  console.log(`[WEEKLY DEBUG] ${phase}:`, JSON.stringify(data, null, 2));
-}
-
 // Load the weekly habits for the logged in user
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, depends }) => {
+  // Mark data dependencies explicitly
+  depends('weekly-habits');
+  
   const session = await locals.auth();
   
   if (!session) {
@@ -33,20 +31,74 @@ export const load: PageServerLoad = async ({ locals }) => {
   
   const db = getDb();
   
-  // For each habit, get this week's records and calculate current momentum
+  // Early return if no habits
+  if (weeklyHabits.length === 0) {
+    return {
+      habits: [],
+      currentWeek
+    };
+  }
+  
+  // Batch fetch all habit records for all habits in one query
+  const habitIds = weeklyHabits.map(habit => habit.id);
+  
+  // Get all records for the current week for all habits in a single query
+  const allWeekRecords = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
+        gte(habitRecords.date, currentWeek.start),
+        lte(habitRecords.date, currentWeek.end)
+      )
+    );
+  
+  // Get momentum history records for all habits in a single query
+  // Calculate the date 8 weeks ago
+  const eightWeeksAgo = new Date();
+  eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56); // 8 weeks * 7 days
+  
+  const allMomentumHistoryRecords = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        sql`${habitRecords.habitId} IN (${habitIds.join(',')})`,
+        gte(habitRecords.date, formatDateYYYYMMDD(eightWeeksAgo))
+      )
+    )
+    .orderBy(habitRecords.date);
+  
+  // Group records by habit ID for faster lookups
+  const weekRecordsByHabitId = {};
+  const momentumHistoryByHabitId = {};
+  
+  // Initialize with empty arrays
+  habitIds.forEach(id => {
+    weekRecordsByHabitId[id] = [];
+    momentumHistoryByHabitId[id] = [];
+  });
+  
+  // Populate week records by habit ID
+  allWeekRecords.forEach(record => {
+    if (weekRecordsByHabitId[record.habitId]) {
+      weekRecordsByHabitId[record.habitId].push(record);
+    }
+  });
+  
+  // Group momentum history records by habit ID
+  allMomentumHistoryRecords.forEach(record => {
+    if (momentumHistoryByHabitId[record.habitId]) {
+      momentumHistoryByHabitId[record.habitId].push(record);
+    }
+  });
+  
+  // Process each habit in parallel with pre-fetched data
   const habitsWithRecords = await Promise.all(
     weeklyHabits.map(async (habit) => {
-      // Get all records for this habit in the current week
-      const records = await db
-        .select()
-        .from(habitRecords)
-        .where(
-          and(
-            eq(habitRecords.habitId, habit.id),
-            gte(habitRecords.date, currentWeek.start),
-            lte(habitRecords.date, currentWeek.end)
-          )
-        );
+      // Get this habit's week records from our pre-fetched data
+      const records = weekRecordsByHabitId[habit.id] || [];
       
       // Count completions
       const completions = records.reduce((sum, record) => sum + record.completed, 0);
@@ -57,6 +109,7 @@ export const load: PageServerLoad = async ({ locals }) => {
       )[0] || null;
       
       // Calculate fresh momentum for display
+      // This is still an expensive operation, but necessary for accuracy
       const currentMomentum = await calculateWeeklyHabitMomentum(
         habit,
         userId,
@@ -64,26 +117,13 @@ export const load: PageServerLoad = async ({ locals }) => {
         currentWeek.end
       );
 
-      // Get momentum history for past 8 weeks
-      const eightWeeksAgo = new Date();
-      eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56); // 8 weeks * 7 days
-      
-      // Get the most recent records for the last 8 weeks
-      const momentumHistoryRecords = await db
-        .select()
-        .from(habitRecords)
-        .where(
-          and(
-            eq(habitRecords.habitId, habit.id),
-            gte(habitRecords.date, formatDateYYYYMMDD(eightWeeksAgo)),
-          )
-        )
-        .orderBy(habitRecords.date);
+      // Process momentum history using pre-fetched data
+      const habitMomentumRecords = momentumHistoryByHabitId[habit.id] || [];
       
       // Group records by week to get a single data point per week
       const weeklyMomentumMap = new Map();
       
-      momentumHistoryRecords.forEach(record => {
+      habitMomentumRecords.forEach(record => {
         // Get the start of the week for this record
         const recordDate = new Date(record.date);
         const weekStart = new Date(recordDate);
@@ -131,8 +171,8 @@ export const load: PageServerLoad = async ({ locals }) => {
         completionsThisWeek: completions,
         targetMet: completions >= (habit.targetCount || 2),
         latestRecord,
-        currentMomentum, // Add freshly calculated momentum
-        momentumHistory, // Add the weekly momentum history
+        currentMomentum,
+        momentumHistory,
       };
     })
   );

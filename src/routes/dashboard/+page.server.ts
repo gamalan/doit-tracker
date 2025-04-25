@@ -3,9 +3,12 @@ import type { PageServerLoad } from './$types';
 import { getUserHabits, getUserTotalMomentum, getCurrentDateYYYYMMDD, getHabitRecordForDate, getDateRangeForWeek, calculateDailyHabitMomentum, calculateWeeklyHabitMomentum, getMomentumHistory } from '$lib/habits';
 import { getDb } from '$lib/db/client';
 import { habitRecords } from '$lib/db/schema';
-import { and, eq, gte, lte } from 'drizzle-orm';
+import { and, eq, gte, lte, sql } from 'drizzle-orm';
 
-export const load: PageServerLoad = async ({ locals }) => {
+export const load: PageServerLoad = async ({ locals, depends }) => {
+  // Mark data dependencies explicitly
+  depends('dashboard-data');
+  
   const session = await locals.auth();
   
   if (!session) {
@@ -18,27 +21,64 @@ export const load: PageServerLoad = async ({ locals }) => {
     throw error(401, 'User ID not found in session');
   }
   
-  // Get user's total momentum score
+  // Get user's total momentum score (this is already optimized)
   const totalMomentum = await getUserTotalMomentum(userId);
   
-  // Get daily habits
-  const dailyHabits = await getUserHabits(userId, 'daily');
-  
-  // Get weekly habits
-  const weeklyHabits = await getUserHabits(userId, 'weekly');
-  
-  // Get momentum history for the past 30 days
+  // Get momentum history for the past 30 days (this is already optimized)
   const momentumHistory = await getMomentumHistory(userId, 30);
   
-  // For daily habits, get today's records
+  // Get all habits in a single query instead of separate calls
+  const allHabits = await getUserHabits(userId);
+  
+  // Split into daily and weekly habits
+  const dailyHabits = allHabits.filter(h => h.type === 'daily');
+  const weeklyHabits = allHabits.filter(h => h.type === 'weekly');
+  
+  // Early return if no habits
+  if (dailyHabits.length === 0 && weeklyHabits.length === 0) {
+    return {
+      totalMomentum,
+      dailyHabits: [],
+      weeklyHabits: [],
+      currentWeek: getDateRangeForWeek(),
+      momentumHistory
+    };
+  }
+  
+  const db = getDb();
   const today = getCurrentDateYYYYMMDD();
+  const currentWeek = getDateRangeForWeek();
+  
+  // Batch processing for daily habits
+  const dailyHabitIds = dailyHabits.map(habit => habit.id);
+  
+  // Get all today's records for daily habits in one query
+  const dailyRecords = dailyHabitIds.length > 0 
+    ? await db
+        .select()
+        .from(habitRecords)
+        .where(
+          and(
+            sql`${habitRecords.habitId} IN (${dailyHabitIds.join(',')})`,
+            eq(habitRecords.date, today)
+          )
+        )
+    : [];
+  
+  // Create a lookup map for faster access
+  const dailyRecordsByHabitId = {};
+  dailyRecords.forEach(record => {
+    dailyRecordsByHabitId[record.habitId] = record;
+  });
+  
+  // Process daily habits with the pre-fetched data
   const dailyHabitsWithRecords = await Promise.all(
     dailyHabits.map(async (habit) => {
-      const record = await getHabitRecordForDate(habit.id, today);
+      const record = dailyRecordsByHabitId[habit.id];
       
-      // Calculate fresh momentum for display
+      // Only calculate momentum if needed (this is still an expensive operation)
       const completed = record?.completed || 0;
-      const currentMomentum = await calculateDailyHabitMomentum(
+      const currentMomentum = record?.momentum || await calculateDailyHabitMomentum(
         habit.id,
         userId,
         today,
@@ -53,23 +93,39 @@ export const load: PageServerLoad = async ({ locals }) => {
     })
   );
   
-  // For weekly habits, get this week's records
-  const db = getDb();
-  const currentWeek = getDateRangeForWeek();
+  // Batch processing for weekly habits
+  const weeklyHabitIds = weeklyHabits.map(habit => habit.id);
   
-  const weeklyHabitsWithRecords = await Promise.all(
-    weeklyHabits.map(async (habit) => {
-      // Get all records for this habit in the current week
-      const records = await db
+  // Get all records for the current week for all weekly habits in a single query
+  const weeklyRecords = weeklyHabitIds.length > 0
+    ? await db
         .select()
         .from(habitRecords)
         .where(
           and(
-            eq(habitRecords.habitId, habit.id),
+            sql`${habitRecords.habitId} IN (${weeklyHabitIds.join(',')})`,
             gte(habitRecords.date, currentWeek.start),
             lte(habitRecords.date, currentWeek.end)
           )
-        );
+        )
+    : [];
+  
+  // Group by habit ID for faster processing
+  const weeklyRecordsByHabitId = {};
+  weeklyHabitIds.forEach(id => {
+    weeklyRecordsByHabitId[id] = [];
+  });
+  
+  weeklyRecords.forEach(record => {
+    if (weeklyRecordsByHabitId[record.habitId]) {
+      weeklyRecordsByHabitId[record.habitId].push(record);
+    }
+  });
+  
+  // Process weekly habits with the pre-fetched data
+  const weeklyHabitsWithRecords = await Promise.all(
+    weeklyHabits.map(async (habit) => {
+      const records = weeklyRecordsByHabitId[habit.id] || [];
       
       // Count completions
       const completions = records.reduce((sum, record) => sum + record.completed, 0);
@@ -79,8 +135,8 @@ export const load: PageServerLoad = async ({ locals }) => {
         new Date(b.date).getTime() - new Date(a.date).getTime()
       )[0] || null;
       
-      // Calculate fresh momentum for display
-      const currentMomentum = await calculateWeeklyHabitMomentum(
+      // Use the latest record's momentum if available, otherwise calculate
+      const currentMomentum = latestRecord?.momentum || await calculateWeeklyHabitMomentum(
         habit,
         userId,
         currentWeek.start,

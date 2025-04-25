@@ -1,7 +1,7 @@
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { page } from "$app/stores";
-  import { invalidateAll } from "$app/navigation";
+  import { invalidate } from "$app/navigation";
   import { onMount } from 'svelte';
 
   // Access the habits and current week data from the page load function
@@ -285,7 +285,8 @@
                 newHabitDescription = "";
                 newHabitTargetCount = 2;
                 formError = "";
-                await invalidateAll(); // Refresh data
+                await invalidate('/habits/weekly');
+                await invalidate('/dashboard');
               } else if (result.data?.error) {
                 formError = result.data.error;
               }
@@ -549,7 +550,8 @@
                   use:enhance={() => {
                     return async ({ result }) => {
                       if (result.type === 'success') {
-                        await invalidateAll();
+                        await invalidate('/habits/weekly');
+                        await invalidate('/dashboard');
                       }
                     };
                   }}
@@ -586,7 +588,8 @@
               use:enhance={() => {
                 return async ({ result }) => {
                   if (result.type === 'success' && result.data?.success) {
-                    await invalidateAll();
+                    await invalidate('/habits/weekly');
+                    await invalidate('/dashboard');
                   }
                 };
               }}

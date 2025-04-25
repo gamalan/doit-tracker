@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { enhance } from "$app/forms";
-	import { invalidateAll } from "$app/navigation";
+	import { invalidate } from "$app/navigation";
 	import { onMount } from 'svelte';
 	
 	// Get data from the server
@@ -398,7 +398,8 @@
 										use:enhance={() => {
 											return async ({ result }) => {
 												if (result.type === 'success') {
-													await invalidateAll();
+													await invalidate('/dashboard');
+													await invalidate('/habits/daily');
 												}
 											};
 										}}

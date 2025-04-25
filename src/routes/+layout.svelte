@@ -3,12 +3,18 @@
 	import { page } from '$app/stores';
 	import { signOut } from '@auth/sveltekit/client';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	
 	let isDropdownOpen = false;
 	let isMobileMenuOpen = false;
 	let dropdownRef: HTMLDivElement;
 
 	$: session = $page.data.session;
+	
+	// Custom navigation function that prevents invalidation
+	function navigate(path: string) {
+		goto(path, { invalidateAll: false });
+	}
 	
 	// Toggle dropdown
 	function toggleDropdown() {
@@ -46,20 +52,20 @@
 		<nav class="mx-auto max-w-7xl px-4 py-4 sm:px-6 lg:px-8">
 			<div class="flex items-center justify-between">
 				<div class="flex items-center">
-					<a href="/" class="transition-opacity hover:opacity-90">
+					<button on:click={() => navigate("/")} class="transition-opacity hover:opacity-90">
 						<span class="text-xl font-bold text-white">DoIt Tracker</span>
-					</a>
+					</button>
 				</div>
 
 				<!-- Mobile menu button -->
 				<div class="md:hidden flex items-center">
 					{#if session}
-						<a href="/dashboard" class="mr-3 p-2 text-white hover:text-indigo-100 flex items-center justify-center">
+						<button on:click={() => navigate("/dashboard")} class="mr-3 p-2 text-white hover:text-indigo-100 flex items-center justify-center">
 							<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
 							</svg>
 							<span class="sr-only">Dashboard</span>
-						</a>
+						</button>
 					{/if}
 					<button 
 						type="button" 
@@ -86,9 +92,9 @@
 				<!-- Desktop navigation -->
 				<div class="hidden md:flex items-center space-x-4">
 					{#if session}
-						<a href="/dashboard" class="text-white hover:text-indigo-100">Dashboard</a>
-						<a href="/habits/daily" class="text-white hover:text-indigo-100">Daily Habits</a>
-						<a href="/habits/weekly" class="text-white hover:text-indigo-100">Weekly Habits</a>
+						<button on:click={() => navigate("/dashboard")} class="text-white hover:text-indigo-100">Dashboard</button>
+						<button on:click={() => navigate("/habits/daily")} class="text-white hover:text-indigo-100">Daily Habits</button>
+						<button on:click={() => navigate("/habits/weekly")} class="text-white hover:text-indigo-100">Weekly Habits</button>
 						<div class="relative ml-3" bind:this={dropdownRef}>
 							<button
 								type="button"
@@ -141,7 +147,7 @@
 							{/if}
 						</div>
 					{:else}
-						<a href="/login" class="text-white hover:text-indigo-100">Sign in</a>
+						<button on:click={() => navigate("/login")} class="text-white hover:text-indigo-100">Sign in</button>
 					{/if}
 				</div>
 			</div>
@@ -151,9 +157,9 @@
 				<div class="md:hidden pt-4 pb-3 border-t border-indigo-500 mt-3">
 					{#if session}
 						<div class="space-y-1 px-2">
-							<a href="/dashboard" class="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Dashboard</a>
-							<a href="/habits/daily" class="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Daily Habits</a>
-							<a href="/habits/weekly" class="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Weekly Habits</a>
+							<button on:click={() => navigate("/dashboard")} class="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Dashboard</button>
+							<button on:click={() => navigate("/habits/daily")} class="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Daily Habits</button>
+							<button on:click={() => navigate("/habits/weekly")} class="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Weekly Habits</button>
 						</div>
 						<div class="border-t border-indigo-500 pt-4 pb-3 mt-3">
 							<div class="flex items-center px-3">
@@ -182,7 +188,7 @@
 						</div>
 					{:else}
 						<div class="space-y-1 px-2">
-							<a href="/login" class="block px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Sign in</a>
+							<button on:click={() => navigate("/login")} class="block w-full text-left px-3 py-2 rounded-md text-base font-medium text-white hover:bg-indigo-500">Sign in</button>
 						</div>
 					{/if}
 				</div>

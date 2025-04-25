@@ -1,0 +1,27 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "public",
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"compatibility_date": "2025-04-24",
+	"compatibility_flags": ["nodejs_compat"],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": ".svelte-kit/cloudflare"
+	},
+	"observability": {
+		"enabled": true
+	},
+	// D1 Database configuration
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "__change_me__",
+			"database_id": "__change_me__"
+		}
+	]
+	// Environment variables have been moved to Cloudflare's secret management
+}

@@ -33,6 +33,14 @@
     });
   };
 
+  const formatShortDate = (dateStr: string): string => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { 
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
   const getDaysOfWeek = (startDate: string, endDate: string): Date[] => {
     const start = new Date(startDate);
     const end = new Date(endDate);
@@ -66,10 +74,105 @@
     return "text-red-500";
   };
 
+  const getMomentumColor = (momentum: number | null) => {
+    if (momentum === null) return "#d1d5db"; // gray-300
+    if (momentum > 30) return "#059669"; // green-600
+    if (momentum > 20) return "#10b981"; // green-500
+    if (momentum > 10) return "#34d399"; // green-400
+    if (momentum > 0) return "#a7f3d0"; // green-300
+    if (momentum === 0) return "#6b7280"; // gray-500
+    if (momentum > -20) return "#fb923c"; // orange-400
+    if (momentum > -30) return "#f97316"; // orange-500
+    return "#ef4444"; // red-500
+  };
+
   const getProgressClass = (completions: number, target: number) => {
     if (completions >= target) return "bg-green-500";
     if (completions > 0) return "bg-yellow-500";
     return "bg-gray-300";
+  };
+
+  // Graph dimensions
+  const graphHeight = 50;
+  const graphWidth = 150;
+  const graphPadding = 5;
+  
+  // Function to create the SVG path for the momentum line
+  const createMomentumPath = (momentumHistory: {date: string, momentum: number | null}[]) => {
+    if (!momentumHistory || momentumHistory.length === 0) return "";
+    
+    // Filter out null momentum values but keep track of their positions
+    const validPoints = momentumHistory
+      .map((record, index) => ({ 
+        index, 
+        momentum: record.momentum === null ? null : record.momentum 
+      }))
+      .filter(p => p.momentum !== null);
+    
+    if (validPoints.length === 0) return "";
+    
+    // Find min and max for scaling
+    const momentumValues = validPoints.map(p => p.momentum);
+    const minMomentum = Math.min(-1, ...momentumValues as number[]); // At least -1 for proper scaling
+    const maxMomentum = Math.max(1, ...momentumValues as number[]); // At least 1 for proper scaling
+    const range = maxMomentum - minMomentum;
+    
+    // Create the SVG path
+    const points = validPoints.map(point => {
+      const x = graphPadding + (point.index / (momentumHistory.length - 1)) * (graphWidth - 2 * graphPadding);
+      const normalizedMomentum = (point.momentum as number - minMomentum) / range;
+      const y = graphHeight - graphPadding - normalizedMomentum * (graphHeight - 2 * graphPadding);
+      return `${x},${y}`;
+    });
+    
+    return `M${points.join(" L")}`;
+  };
+  
+  // Function to create circle points for each data point
+  const createMomentumPoints = (momentumHistory: {date: string, momentum: number | null}[]) => {
+    if (!momentumHistory || momentumHistory.length === 0) return [];
+    
+    // Find min and max for scaling
+    const momentumValues = momentumHistory
+      .map(record => record.momentum)
+      .filter(m => m !== null) as number[];
+    
+    if (momentumValues.length === 0) return [];
+    
+    const minMomentum = Math.min(-1, ...momentumValues);
+    const maxMomentum = Math.max(1, ...momentumValues);
+    const range = maxMomentum - minMomentum;
+    
+    return momentumHistory.map((record, index) => {
+      if (record.momentum === null) return null;
+      
+      const x = graphPadding + (index / (momentumHistory.length - 1)) * (graphWidth - 2 * graphPadding);
+      const normalizedMomentum = (record.momentum - minMomentum) / range;
+      const y = graphHeight - graphPadding - normalizedMomentum * (graphHeight - 2 * graphPadding);
+      
+      return {
+        x,
+        y,
+        momentum: record.momentum,
+        date: record.date
+      };
+    }).filter(p => p !== null);
+  };
+  
+  // Draw the zero line position
+  const getZeroLineY = (momentumHistory: {date: string, momentum: number | null}[]) => {
+    const momentumValues = momentumHistory
+      .map(record => record.momentum)
+      .filter(m => m !== null) as number[];
+    
+    if (momentumValues.length === 0) return graphHeight / 2;
+    
+    const minMomentum = Math.min(-1, ...momentumValues);
+    const maxMomentum = Math.max(1, ...momentumValues);
+    const range = maxMomentum - minMomentum;
+    
+    const normalizedZero = (0 - minMomentum) / range;
+    return graphHeight - graphPadding - normalizedZero * (graphHeight - 2 * graphPadding);
   };
 </script>
 
@@ -199,6 +302,62 @@
               {habit.currentMomentum || 0}
             </span>
           </div>
+          
+          <!-- Momentum Graph -->
+          {#if habit.momentumHistory && habit.momentumHistory.length > 0}
+            <div class="my-3">
+              <div class="mb-1">
+                <span class="text-xs font-medium text-gray-500">8-Week Momentum</span>
+              </div>
+              
+              <div class="relative">
+                <svg width={graphWidth} height={graphHeight} class="w-full">
+                  <!-- Zero reference line -->
+                  <line 
+                    x1={graphPadding} 
+                    y1={getZeroLineY(habit.momentumHistory)} 
+                    x2={graphWidth - graphPadding} 
+                    y2={getZeroLineY(habit.momentumHistory)} 
+                    stroke="#e5e7eb" 
+                    stroke-width="1" 
+                    stroke-dasharray="4" 
+                  />
+                  
+                  <!-- Momentum line -->
+                  {#if createMomentumPath(habit.momentumHistory)}
+                    <path 
+                      d={createMomentumPath(habit.momentumHistory)} 
+                      fill="none" 
+                      stroke="#8b5cf6" 
+                      stroke-width="2" 
+                      stroke-linejoin="round"
+                    />
+                  {/if}
+                  
+                  <!-- Data points -->
+                  {#each createMomentumPoints(habit.momentumHistory) as point}
+                    <circle 
+                      cx={point.x} 
+                      cy={point.y} 
+                      r="3" 
+                      fill="white" 
+                      stroke={getMomentumColor(point.momentum)} 
+                      stroke-width="2"
+                    >
+                      <title>{point.date}: {point.momentum}</title>
+                    </circle>
+                  {/each}
+                </svg>
+              </div>
+              
+              <!-- Show select dates to save space -->
+              <div class="flex justify-between text-xs text-gray-400 mt-1 px-1">
+                <span>{formatShortDate(habit.momentumHistory[0].date)}</span>
+                <span>{formatShortDate(habit.momentumHistory[3].date)}</span>
+                <span>{formatShortDate(habit.momentumHistory[7].date)}</span>
+              </div>
+            </div>
+          {/if}
           
           <!-- Progress bar -->
           <div class="mb-4">

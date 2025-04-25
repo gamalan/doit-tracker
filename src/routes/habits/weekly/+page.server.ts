@@ -63,6 +63,67 @@ export const load: PageServerLoad = async ({ locals }) => {
         currentWeek.start,
         currentWeek.end
       );
+
+      // Get momentum history for past 8 weeks
+      const eightWeeksAgo = new Date();
+      eightWeeksAgo.setDate(eightWeeksAgo.getDate() - 56); // 8 weeks * 7 days
+      
+      // Get the most recent records for the last 8 weeks
+      const momentumHistoryRecords = await db
+        .select()
+        .from(habitRecords)
+        .where(
+          and(
+            eq(habitRecords.habitId, habit.id),
+            gte(habitRecords.date, formatDateYYYYMMDD(eightWeeksAgo)),
+          )
+        )
+        .orderBy(habitRecords.date);
+      
+      // Group records by week to get a single data point per week
+      const weeklyMomentumMap = new Map();
+      
+      momentumHistoryRecords.forEach(record => {
+        // Get the start of the week for this record
+        const recordDate = new Date(record.date);
+        const weekStart = new Date(recordDate);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
+        const weekKey = formatDateYYYYMMDD(weekStart);
+        
+        // Only keep the latest record for each week
+        if (!weeklyMomentumMap.has(weekKey) || 
+            new Date(record.date) > new Date(weeklyMomentumMap.get(weekKey).date)) {
+          weeklyMomentumMap.set(weekKey, {
+            date: record.date,
+            momentum: record.momentum
+          });
+        }
+      });
+      
+      // Convert the map to an array and sort by date
+      let momentumHistory = Array.from(weeklyMomentumMap.values())
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
+      // Ensure we have exactly 8 data points
+      while (momentumHistory.length < 8) {
+        // Add null momentum for missing weeks at the beginning
+        const earliestDate = momentumHistory.length > 0 
+          ? new Date(momentumHistory[0].date) 
+          : new Date();
+        
+        const prevWeekDate = new Date(earliestDate);
+        prevWeekDate.setDate(prevWeekDate.getDate() - 7);
+        
+        momentumHistory.unshift({
+          date: formatDateYYYYMMDD(prevWeekDate),
+          momentum: null
+        });
+      }
+      
+      // Trim to the last 8 weeks
+      if (momentumHistory.length > 8) {
+        momentumHistory = momentumHistory.slice(-8);
+      }
       
       return {
         ...habit,
@@ -70,7 +131,8 @@ export const load: PageServerLoad = async ({ locals }) => {
         completionsThisWeek: completions,
         targetMet: completions >= (habit.targetCount || 2),
         latestRecord,
-        currentMomentum // Add freshly calculated momentum
+        currentMomentum, // Add freshly calculated momentum
+        momentumHistory, // Add the weekly momentum history
       };
     })
   );

@@ -64,6 +64,26 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   console.log(`Weekly habits: Found ${allWeekRecords.length} records for current week`);
   console.log(`Weekly habits: Date range: ${currentWeek.start} to ${currentWeek.end}`);
   
+  // For the current week, also fetch recent records from the previous week
+  // to account for habits where completions are across multiple weeks
+  const twoWeeksAgo = new Date();
+  twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14); // Get records from last 14 days
+  const twoWeeksAgoStr = formatDateYYYYMMDD(twoWeeksAgo);
+  
+  const recentRecords = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        inArray(habitRecords.habitId, habitIds),
+        gte(habitRecords.date, twoWeeksAgoStr),
+        lt(habitRecords.date, currentWeek.start), // Records before current week
+        eq(habitRecords.completed, 1) // Only completed ones
+      )
+    );
+  
+  console.log(`Weekly habits: Found ${recentRecords.length} additional recent records from previous weeks`);
+  
   // Get momentum history records for all habits in a single query
   // Calculate the date 8 weeks ago
   const eightWeeksAgo = new Date();
@@ -97,6 +117,13 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
   
   // Populate week records by habit ID
   allWeekRecords.forEach(record => {
+    if (weekRecordsByHabitId[record.habitId]) {
+      weekRecordsByHabitId[record.habitId].push(record);
+    }
+  });
+  
+  // Include recent records in the week records
+  recentRecords.forEach(record => {
     if (weekRecordsByHabitId[record.habitId]) {
       weekRecordsByHabitId[record.habitId].push(record);
     }

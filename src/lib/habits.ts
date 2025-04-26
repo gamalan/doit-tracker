@@ -158,8 +158,7 @@ export async function createOrUpdateHabitRecord({
         .update(habitRecords)
         .set({ 
           completed, 
-          momentum: momentum !== null ? momentum : existingRecord.momentum,
-          updatedAt: new Date()
+          momentum: momentum !== null ? momentum : existingRecord.momentum
         })
         .where(
           and(
@@ -184,8 +183,7 @@ export async function createOrUpdateHabitRecord({
           date: standardDate,
           completed,
           momentum: momentum || 0,
-          createdAt: new Date(),
-          updatedAt: new Date()
+          createdAt: new Date()
         })
         .returning();
       
@@ -387,58 +385,104 @@ export async function getUserTotalMomentum(userId: string): Promise<number> {
   const db = getDb();
   const currentWeek = getDateRangeForWeek();
   const today = getCurrentDateYYYYMMDD();
+  console.log(`Calculating total momentum for today ${today} in week ${currentWeek.start} to ${currentWeek.end}`);
+  
+  // Import the inArray operator
+  const { inArray } = await import('drizzle-orm');
   
   // Track separate components to help with debugging
   let dailyMomentum = 0;
   let weeklyMomentum = 0;
+  
+  // OPTIMIZATION: Pre-fetch all habits for this user once
+  const [dailyHabits, weeklyHabits] = await Promise.all([
+    getUserHabits(userId, 'daily'),
+    getUserHabits(userId, 'weekly')
+  ]);
+  
+  console.log(`Found ${dailyHabits.length} daily habits and ${weeklyHabits.length} weekly habits`);
+  
+  // Get all habit IDs to use in queries
+  const allHabitIds = [...dailyHabits, ...weeklyHabits].map(habit => habit.id);
+  
   // ---------- DAILY HABITS ----------
   // Simple calculation: 1 point per completed daily habit today
-  const dailyHabits = await getUserHabits(userId, 'daily');
+  // Get today's records for all daily habits in one query
+  const dailyRecordsToday = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        inArray(habitRecords.habitId, dailyHabits.map(h => h.id)),
+        eq(habitRecords.date, today),
+        eq(habitRecords.completed, 1)
+      )
+    );
   
-  for (const habit of dailyHabits) {
-    const todayRecord = await getHabitRecordForDate(habit.id, today);
-    if (todayRecord && todayRecord.completed > 0) {
-      dailyMomentum += 1;
-    }
-  }
+  // Count completed daily habits
+  dailyMomentum = dailyRecordsToday.length;
+  console.log(`Daily habits completed today: ${dailyMomentum}`);
   
   // ---------- WEEKLY HABITS ----------
-  // For weekly habits, count completions + target bonus
-  const weeklyHabits = await getUserHabits(userId, 'weekly');
-  for (const habit of weeklyHabits) {
-    // Count completed records for this habit in the current week
-    const weekRecords = await db
+  // For weekly habits, consider completions from the last 14 days for consistency with getMomentumHistory
+  if (weeklyHabits.length > 0) {
+    // Get date 14 days ago
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+    const twoWeeksAgoStr = formatDateYYYYMMDD(twoWeeksAgo);
+    
+    // Get all weekly habit records from the last 14 days in a single query
+    const weeklyRecords = await db
       .select()
       .from(habitRecords)
       .where(
         and(
-          eq(habitRecords.habitId, habit.id),
-          gte(habitRecords.date, currentWeek.start),
-          lte(habitRecords.date, currentWeek.end),
-          eq(habitRecords.completed, 1) // Only count completed records
+          inArray(habitRecords.habitId, weeklyHabits.map(h => h.id)),
+          gte(habitRecords.date, twoWeeksAgoStr),
+          lte(habitRecords.date, today),
+          eq(habitRecords.completed, 1)
         )
       );
     
-    // Add the number of completions
-    const completionsThisWeek = weekRecords.length;
-    weeklyMomentum += completionsThisWeek;
+    console.log(`Found ${weeklyRecords.length} completed weekly habit records in the last 14 days`);
     
-    // Add target bonus if applicable
-    if (completionsThisWeek >= (habit.targetCount || 2)) {
-      weeklyMomentum += 10;
+    // Count completions by habit
+    const weeklyCompletionsByHabit = new Map<string, number>();
+    weeklyHabits.forEach(habit => weeklyCompletionsByHabit.set(habit.id, 0));
+    
+    weeklyRecords.forEach(record => {
+      const count = weeklyCompletionsByHabit.get(record.habitId) || 0;
+      weeklyCompletionsByHabit.set(record.habitId, count + 1);
+    });
+    
+    // Calculate momentum for each weekly habit
+    for (const habit of weeklyHabits) {
+      const totalCompletions = weeklyCompletionsByHabit.get(habit.id) || 0;
+      
+      // Add the number of completions to the momentum
+      weeklyMomentum += totalCompletions;
+      
+      // Add target bonus if applicable
+      if (totalCompletions >= (habit.targetCount || 2)) {
+        weeklyMomentum += 10;
+      }
+      
+      console.log(`Weekly habit "${habit.name}" (${habit.id}): ${totalCompletions}/${habit.targetCount || 2} completions in last 14 days, adds ${totalCompletions + (totalCompletions >= (habit.targetCount || 2) ? 10 : 0)} to momentum`);
     }
   }
   
-  return dailyMomentum + weeklyMomentum;
+  const totalMomentum = dailyMomentum + weeklyMomentum;
+  console.log(`Total momentum: ${dailyMomentum} (daily) + ${weeklyMomentum} (weekly) = ${totalMomentum}`);
+  
+  return totalMomentum;
 }
 
 // Get momentum history for the last 30 days
 export async function getMomentumHistory(userId: string, days: number = 30): Promise<{ date: string; momentum: number }[]> {
   const db = getDb();
-  const result: { date: string; momentum: number }[] = [];
   
-  // Get end date (today) and start date (30 days ago)
-  const endDate = new Date(); // Use current date
+  // Get end date (today) and start date (n days ago)
+  const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(endDate.getDate() - (days - 1)); // Subtract days-1 to include today
   
@@ -446,70 +490,199 @@ export async function getMomentumHistory(userId: string, days: number = 30): Pro
   const endDateStr = formatDateYYYYMMDD(endDate);
   const startDateStr = formatDateYYYYMMDD(startDate);
   
-  // Iterate through each day in the range
-  const currentDate = new Date(startDate);
-  while (currentDate <= endDate) {
-    const dateStr = formatDateYYYYMMDD(currentDate);
+  console.log(`Calculating momentum history from ${startDateStr} to ${endDateStr}`);
+  
+  // Import the inArray operator directly for proper query building
+  const { inArray } = await import('drizzle-orm');
+  
+  // OPTIMIZATION: Pre-fetch all habits for this user once
+  const [dailyHabits, weeklyHabits] = await Promise.all([
+    getUserHabits(userId, 'daily'),
+    getUserHabits(userId, 'weekly')
+  ]);
+  
+  console.log(`Found ${dailyHabits.length} daily habits and ${weeklyHabits.length} weekly habits`);
+  
+  // Get all habit IDs to use in queries
+  const allHabitIds = [...dailyHabits, ...weeklyHabits].map(habit => habit.id);
+  
+  // Early return if no habits exist
+  if (allHabitIds.length === 0) {
+    console.log("No habits found, returning empty momentum history");
+    return [];
+  }
+  
+  // OPTIMIZATION: Fetch all relevant habit records in a single query
+  // Include records from before the start date to properly calculate weekly momentum
+  // We need to get records from at most 14 days before the start date to account for weekly habits across multiple weeks
+  const extendedStartDate = new Date(startDate);
+  extendedStartDate.setDate(extendedStartDate.getDate() - 14); // Expand to 14 days prior to catch more weekly records
+  const extendedStartDateStr = formatDateYYYYMMDD(extendedStartDate);
+  
+  // Use proper inArray operator instead of SQL template string
+  const allHabitRecords = await db
+    .select()
+    .from(habitRecords)
+    .where(
+      and(
+        eq(habitRecords.userId, userId),
+        gte(habitRecords.date, extendedStartDateStr),
+        lte(habitRecords.date, endDateStr),
+        inArray(habitRecords.habitId, allHabitIds)
+      )
+    );
+  
+  console.log(`Found ${allHabitRecords.length} habit records in extended date range ${extendedStartDateStr} to ${endDateStr}`);
+  
+  // Group records by habit ID for easier processing
+  const recordsByHabitId = new Map<string, HabitRecord[]>();
+  allHabitIds.forEach(id => recordsByHabitId.set(id, []));
+  
+  allHabitRecords.forEach(record => {
+    const habitRecords = recordsByHabitId.get(record.habitId) || [];
+    habitRecords.push(record);
+    recordsByHabitId.set(record.habitId, habitRecords);
+  });
+  
+  // Debug log for habit record counts
+  allHabitIds.forEach(id => {
+    const habit = [...dailyHabits, ...weeklyHabits].find(h => h.id === id);
+    const records = recordsByHabitId.get(id) || [];
+    console.log(`Habit "${habit?.name}" (${id}) has ${records.length} records, type: ${habit?.type}`);
+  });
+  
+  // Create lookup for daily habit records by date
+  const recordsByHabitAndDate = new Map<string, HabitRecord>();
+  
+  // Organize daily records for quick lookup
+  allHabitRecords.forEach(record => {
+    // Map for easy habit lookup on a specific date
+    const key = `${record.habitId}_${record.date}`;
+    recordsByHabitAndDate.set(key, record);
+  });
+  
+  // Count completed records for each weekly habit in the most recent 14 days
+  // This ensures we capture completions across multiple weeks
+  const weeklyCompletionsByHabit = new Map<string, number>();
+  
+  // Find the most recent date in our data
+  const mostRecentDate = new Date(endDateStr);
+  // Get date 14 days before most recent date
+  const twoWeeksAgo = new Date(mostRecentDate);
+  twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+  const twoWeeksAgoStr = formatDateYYYYMMDD(twoWeeksAgo);
+  
+  // Count completions in the last 14 days for each weekly habit
+  weeklyHabits.forEach(habit => {
+    const habitRecords = recordsByHabitId.get(habit.id) || [];
+    // Filter to only include records in the last 14 days that are completed
+    const recentCompletedRecords = habitRecords.filter(record => {
+      return record.date >= twoWeeksAgoStr && record.completed > 0;
+    });
+    weeklyCompletionsByHabit.set(habit.id, recentCompletedRecords.length);
     
-    // We need to calculate the momentum score for this specific date
-    // using the same formulas as getUserTotalMomentum but for the specified date
+    console.log(`Habit "${habit.name}" (${habit.id}) has ${recentCompletedRecords.length} completed records in last 14 days`);
+  });
+  
+  // Generate result for each day in the requested date range
+  const result: { date: string; momentum: number }[] = [];
+  const dateArray: string[] = [];
+  
+  // Create array of all dates in the range
+  let currentDate = new Date(startDate);
+  while (currentDate <= endDate) {
+    dateArray.push(formatDateYYYYMMDD(currentDate));
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  
+  // Process each date
+  for (const dateStr of dateArray) {
     let dailyMomentum = 0;
     let weeklyMomentum = 0;
     
-    // Get week date range for this specific date
-    const weekRange = getDateRangeForWeek(currentDate);
-    
     // ---------- DAILY HABITS ----------
-    const dailyHabits = await getUserHabits(userId, 'daily');
-    for (const habit of dailyHabits) {
-      const dateRecord = await getHabitRecordForDate(habit.id, dateStr);
-      // Follow the same formula from getUserTotalMomentum - 1 point per completed daily habit
-      if (dateRecord && dateRecord.completed > 0) {
+    // 1 point per completed daily habit for this specific day
+    dailyHabits.forEach(habit => {
+      const key = `${habit.id}_${dateStr}`;
+      const record = recordsByHabitAndDate.get(key);
+      if (record && record.completed > 0) {
         dailyMomentum += 1;
       }
-    }
+    });
     
     // ---------- WEEKLY HABITS ----------
-    const weeklyHabits = await getUserHabits(userId, 'weekly');
-    for (const habit of weeklyHabits) {
-      // Count completed records for this habit in the week of the current date
-      const weekRecords = await db
-        .select()
-        .from(habitRecords)
-        .where(
-          and(
-            eq(habitRecords.habitId, habit.id),
-            gte(habitRecords.date, weekRange.start),
-            lte(habitRecords.date, weekRange.end),
-            eq(habitRecords.completed, 1) // Only count completed records
-          )
-        );
+    // Get week date range for this date
+    const dateObj = new Date(dateStr);
+    const currentWeek = getDateRangeForWeek(dateObj);
+    
+    // Special handling for the most recent week (add recent records across weeks)
+    const isCurrentWeek = currentWeek.start === getDateRangeForWeek(mostRecentDate).start;
+    
+    // Process each weekly habit separately
+    weeklyHabits.forEach(habit => {
+      // Get all records for this habit
+      const habitRecords = recordsByHabitId.get(habit.id) || [];
       
-      // Add the number of completions (following the same formula as getUserTotalMomentum)
-      const completionsThisWeek = weekRecords.length;
-      weeklyMomentum += completionsThisWeek;
-      
-      // Add target bonus if applicable
-      if (completionsThisWeek >= (habit.targetCount || 2)) {
-        weeklyMomentum += 10;
+      // Calculate habit momentum differently depending on whether it's the current week
+      if (isCurrentWeek) {
+        // For the current week, use the pre-calculated completions across multiple weeks
+        const totalCompletions = weeklyCompletionsByHabit.get(habit.id) || 0;
+        
+        // Base points are the number of completions
+        let habitMomentum = totalCompletions;
+        
+        // Add target bonus if applicable
+        const targetCount = habit.targetCount || 2;
+        if (totalCompletions >= targetCount) {
+          habitMomentum += 10;
+        }
+        
+        // Add to weekly momentum
+        weeklyMomentum += habitMomentum;
+        
+        console.log(`CURRENT WEEK - Date ${dateStr}, habit "${habit.name}" (${habit.id}): all completions=${totalCompletions}/${targetCount}, contributes=${habitMomentum} points`);
+      } else {
+        // For past weeks, only count completions within that specific week
+        // Convert week range strings to Date objects for proper comparison
+        const weekStartDate = new Date(currentWeek.start + "T00:00:00Z");
+        const weekEndDate = new Date(currentWeek.end + "T23:59:59Z");
+        
+        // Count completions this week
+        const completionsThisWeek = habitRecords.filter(record => {
+          const recordDate = new Date(record.date + "T00:00:00Z");
+          return record.completed > 0 && 
+                recordDate >= weekStartDate && 
+                recordDate <= weekEndDate;
+        }).length;
+        
+        // Calculate momentum for this habit
+        let habitMomentum = completionsThisWeek;
+        
+        // Add target bonus if applicable
+        const targetCount = habit.targetCount || 2;
+        if (completionsThisWeek >= targetCount) {
+          habitMomentum += 10;
+        }
+        
+        // Add this habit's momentum to the weekly total
+        weeklyMomentum += habitMomentum;
+        
+        console.log(`Date ${dateStr}, habit "${habit.name}" (${habit.id}): completions=${completionsThisWeek}/${targetCount}, contributes=${habitMomentum} points`);
       }
-    }
+    });
     
     // Calculate total momentum for this day
     const totalMomentum = dailyMomentum + weeklyMomentum;
+    
+    console.log(`Date ${dateStr} (week ${currentWeek.start} to ${currentWeek.end}): daily=${dailyMomentum}, weekly=${weeklyMomentum}, total=${totalMomentum}`);
     
     // Add to result
     result.push({
       date: dateStr,
       momentum: totalMomentum
     });
-    
-    // Move to next day - create a new Date object to avoid reference issues
-    const nextDate = new Date(currentDate);
-    nextDate.setDate(currentDate.getDate() + 1);
-    currentDate.setTime(nextDate.getTime());
   }
   
-  // Sort result by date to ensure correct order
-  return result.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  console.log(`Generated momentum history with ${result.length} days`);
+  return result;
 }

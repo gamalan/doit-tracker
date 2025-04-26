@@ -82,19 +82,19 @@ export const GET = async ({ locals }) => {
       // Debug the records for this habit
       console.log(`Habit ID ${habit.id} (${habit.name}) has ${records.length} records:`, records);
       
-      // Count completions - fix this to properly account for completed records
-      // A record is considered "completed" when completed > 0
-      const completions = records.reduce((sum, record) => sum + (record.completed > 0 ? 1 : 0), 0);
+      // Count completions - properly sum the completed values rather than just counting records
+      const completions = records.reduce((sum, record) => sum + record.completed, 0);
       
-      console.log(`Habit ${habit.name} has ${completions} completions this week`);
+      console.log(`Weekly habit "${habit.name}" has ${completions} completions this week`);
       
       // Find the latest record (for momentum)
       const latestRecord = records.sort((a, b) => 
         new Date(b.date).getTime() - new Date(a.date).getTime()
       )[0] || null;
       
-      // Use the latest record's momentum if available, otherwise calculate
-      const currentMomentum = latestRecord?.momentum || await calculateWeeklyHabitMomentum(
+      // Calculate fresh momentum instead of using latest record momentum
+      // This ensures we always use the most up-to-date calculation
+      const currentMomentum = await calculateWeeklyHabitMomentum(
         habit,
         userId,
         currentWeek.start,

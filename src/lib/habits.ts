@@ -272,19 +272,22 @@ export async function calculateWeeklyHabitMomentum(
       )
     );
   
-  // Count total completions for the week
+  // Count total completions for the week - sum the actual completed values
   const completionsThisWeek = weekRecords.reduce((sum, record) => sum + record.completed, 0);
+  
+  console.log(`Weekly habit "${habit.name}" (${habit.id}): ${completionsThisWeek} completions this week`);
   
   // Find if minimum target was reached
   const targetReached = completionsThisWeek >= (habit.targetCount || 2);
   
-  // Base momentum calculation - ALWAYS add +1 per completed tracking
+  // Base momentum calculation - ALWAYS add actual completion count
   let momentum = completionsThisWeek;
   
   if (targetReached) {
     // Target reached - add significant bonus
     // This ensures the momentum is always at least 10 + number of completions when target is met
     momentum += 10;
+    console.log(`Momentum after target bonus: ${momentum}`);
     
     // Check for consecutive weekly successes
     const previousWeekEnd = new Date(weekStartDate);
@@ -317,11 +320,13 @@ export async function calculateWeeklyHabitMomentum(
       // If previous week also reached target (consecutive success)
       // Add another significant bonus to create a compounding effect
       momentum = Math.min(momentum + 10, 40); // Cap at +40
+      console.log(`Momentum after consecutive bonus: ${momentum}`);
     }
   } else if (completionsThisWeek >= 1) {
     // At least one tracking but didn't reach the target
     // No additional logic needed - momentum is already set to completionsThisWeek above
     // This ensures each tracking counts as +1 regardless of target
+    console.log(`Momentum without target reached: ${momentum}`);
   } else {
     // No completions this week - reset momentum to 0 and potentially decrease
     // Get previous week's record to determine consecutive misses
@@ -377,6 +382,7 @@ export async function calculateWeeklyHabitMomentum(
     }
   }
   
+  console.log(`Final momentum for "${habit.name}" (${habit.id}): ${momentum}`);
   return momentum;
 }
 
@@ -579,9 +585,10 @@ export async function getMomentumHistory(userId: string, days: number = 30): Pro
     const recentCompletedRecords = habitRecords.filter(record => {
       return record.date >= twoWeeksAgoStr && record.completed > 0;
     });
-    weeklyCompletionsByHabit.set(habit.id, recentCompletedRecords.length);
+    const completionCount = recentCompletedRecords.length;
+    weeklyCompletionsByHabit.set(habit.id, completionCount);
     
-    console.log(`Habit "${habit.name}" (${habit.id}) has ${recentCompletedRecords.length} completed records in last 14 days`);
+    console.log(`Habit "${habit.name}" (${habit.id}) has ${completionCount} completed records in last 14 days`);
   });
   
   // Generate result for each day in the requested date range
@@ -606,7 +613,8 @@ export async function getMomentumHistory(userId: string, days: number = 30): Pro
       const key = `${habit.id}_${dateStr}`;
       const record = recordsByHabitAndDate.get(key);
       if (record && record.completed > 0) {
-        dailyMomentum += 1;
+        // Add the actual completed value, not just 1 point
+        dailyMomentum += record.completed;
       }
     });
     

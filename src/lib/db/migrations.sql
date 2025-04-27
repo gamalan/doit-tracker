@@ -43,7 +43,6 @@ CREATE INDEX IF NOT EXISTS habit_records_date_idx ON habit_records(date);
 -- Add accumulated_momentum column if it doesn't exist
 -- This allows migration for existing databases
 PRAGMA foreign_keys=off;
-BEGIN TRANSACTION;
 
 -- Create temporary table with the new structure
 CREATE TABLE IF NOT EXISTS habits_new (
@@ -71,5 +70,4 @@ ALTER TABLE habits_new RENAME TO habits;
 -- Recreate indexes
 CREATE INDEX IF NOT EXISTS habits_user_id_idx ON habits(user_id);
 
-COMMIT;
 PRAGMA foreign_keys=on;

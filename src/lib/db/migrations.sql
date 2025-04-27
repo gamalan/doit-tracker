@@ -59,9 +59,22 @@ CREATE TABLE IF NOT EXISTS habits_new (
 );
 
 -- Copy all data from the original table
+-- Using a more SQLite-compatible approach that handles whether accumulated_momentum exists or not
 INSERT INTO habits_new
-SELECT id, user_id, name, description, type, target_count, 0 as accumulated_momentum, created_at, archived_at
-FROM habits;
+SELECT 
+  h.id, 
+  h.user_id, 
+  h.name, 
+  h.description, 
+  h.type, 
+  h.target_count,
+  COALESCE(
+    (SELECT accumulated_momentum FROM habits WHERE id = h.id),
+    0
+  ) as accumulated_momentum,
+  h.created_at, 
+  h.archived_at
+FROM habits h;
 
 -- Drop the original table and rename the new one
 DROP TABLE IF EXISTS habits;

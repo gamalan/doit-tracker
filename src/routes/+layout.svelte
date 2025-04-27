@@ -208,7 +208,13 @@
 				<p class="text-sm text-gray-500">
 					© {new Date().getFullYear()} DoIt Tracker - A guilt-free habit tracker
 				</p>
-				<div class="mt-2 md:mt-0">
+				<div class="mt-2 md:mt-0 flex space-x-4">
+					<a href="/terms" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+						Terms of Service
+					</a>
+					<a href="/privacy" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium">
+						Privacy Policy
+					</a>
 					<a href="https://utas.me/barebearfoot-gan" class="text-indigo-600 hover:text-indigo-800 text-sm font-medium" target="_blank" rel="noopener noreferrer">
 						Contact
 					</a>

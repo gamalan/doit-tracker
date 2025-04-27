@@ -408,26 +408,64 @@ export async function getUserTotalMomentum(userId: string): Promise<number> {
   
   console.log(`Found ${dailyHabits.length} daily habits and ${weeklyHabits.length} weekly habits`);
   
-  // Get all habit IDs to use in queries
-  const allHabitIds = [...dailyHabits, ...weeklyHabits].map(habit => habit.id);
-  
   // ---------- DAILY HABITS ----------
-  // Simple calculation: 1 point per completed daily habit today
-  // Get today's records for all daily habits in one query
-  const dailyRecordsToday = await db
+  // For accumulated momentum, get all records for the last 7 days
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6); // Include today and the past 6 days
+  const sevenDaysAgoStr = formatDateYYYYMMDD(sevenDaysAgo);
+  
+  // Get all daily habit records for the last 7 days
+  const dailyHabitRecords = await db
     .select()
     .from(habitRecords)
     .where(
       and(
         inArray(habitRecords.habitId, dailyHabits.map(h => h.id)),
-        eq(habitRecords.date, today),
-        eq(habitRecords.completed, 1)
+        gte(habitRecords.date, sevenDaysAgoStr),
+        lte(habitRecords.date, today)
       )
     );
+    
+  console.log(`Found ${dailyHabitRecords.length} daily habit records in the last 7 days`);
   
-  // Count completed daily habits
-  dailyMomentum = dailyRecordsToday.length;
-  console.log(`Daily habits completed today: ${dailyMomentum}`);
+  // Group records by habit ID
+  const recordsByHabitId = new Map();
+  dailyHabitRecords.forEach(record => {
+    if (!recordsByHabitId.has(record.habitId)) {
+      recordsByHabitId.set(record.habitId, []);
+    }
+    recordsByHabitId.get(record.habitId).push(record);
+  });
+  
+  // Calculate accumulated momentum for each habit
+  for (const habit of dailyHabits) {
+    const habitRecords = recordsByHabitId.get(habit.id) || [];
+    
+    // Check if we have records for this habit
+    if (habitRecords.length > 0) {
+      // Add up all positive momentum values
+      const habitMomentum = habitRecords
+        .filter(record => record.momentum > 0)
+        .reduce((sum, record) => sum + record.momentum, 0);
+      
+      dailyMomentum += habitMomentum;
+      console.log(`Habit "${habit.name}" accumulated momentum: ${habitMomentum}`);
+    } else {
+      // No records for this habit, check if we should preserve streak from yesterday
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayFormatted = formatDateYYYYMMDD(yesterday);
+      
+      const previousRecord = await getHabitRecordForDate(habit.id, yesterdayFormatted);
+      
+      if (previousRecord && previousRecord.completed > 0 && previousRecord.momentum > 0) {
+        dailyMomentum += previousRecord.momentum;
+        console.log(`Adding ${previousRecord.momentum} points to daily momentum from habit "${habit.name}" - preserved streak from yesterday`);
+      }
+    }
+  }
+  
+  console.log(`Daily habits accumulated momentum: ${dailyMomentum}`);
   
   // ---------- WEEKLY HABITS ----------
   // For weekly habits, consider completions from the last 14 days for consistency with getMomentumHistory
@@ -608,15 +646,42 @@ export async function getMomentumHistory(userId: string, days: number = 30): Pro
     let weeklyMomentum = 0;
     
     // ---------- DAILY HABITS ----------
-    // 1 point per completed daily habit for this specific day
-    dailyHabits.forEach(habit => {
-      const key = `${habit.id}_${dateStr}`;
-      const record = recordsByHabitAndDate.get(key);
-      if (record && record.completed > 0) {
-        // Add the actual completed value, not just 1 point
-        dailyMomentum += record.completed;
+    // For each daily habit, calculate accumulated momentum from all records
+    for (const habit of dailyHabits) {
+      let habitAccumulatedMomentum = 0;
+      
+      // Get all records for this habit up to and including this date
+      const habitRecords = recordsByHabitId.get(habit.id) || [];
+      const recordsUpToDate = habitRecords.filter(record => 
+        record.date <= dateStr && 
+        record.date >= startDateStr && 
+        record.momentum > 0
+      );
+      
+      // Add up all positive momentum values
+      if (recordsUpToDate.length > 0) {
+        habitAccumulatedMomentum = recordsUpToDate.reduce((sum, record) => sum + record.momentum, 0);
+        console.log(`[History] Date ${dateStr}, habit "${habit.name}": accumulated momentum = ${habitAccumulatedMomentum}`);
+      } 
+      
+      // For today only, if no record exists but has streak from yesterday
+      if (dateStr === endDateStr && habitAccumulatedMomentum === 0) {
+        const prevDate = new Date(dateStr);
+        prevDate.setDate(prevDate.getDate() - 1);
+        const prevDateStr = formatDateYYYYMMDD(prevDate);
+        const prevKey = `${habit.id}_${prevDateStr}`;
+        const prevRecord = recordsByHabitAndDate.get(prevKey);
+        
+        if (prevRecord && prevRecord.completed > 0 && prevRecord.momentum > 0) {
+          // Add the previous day's momentum for preserved streak
+          habitAccumulatedMomentum = prevRecord.momentum;
+          console.log(`[History] Date ${dateStr}: Preserving streak momentum ${prevRecord.momentum} for habit "${habit.name}"`);
+        }
       }
-    });
+      
+      // Add this habit's accumulated momentum to the total
+      dailyMomentum += habitAccumulatedMomentum;
+    }
     
     // ---------- WEEKLY HABITS ----------
     // Get week date range for this date
@@ -693,4 +758,36 @@ export async function getMomentumHistory(userId: string, days: number = 30): Pro
   
   console.log(`Generated momentum history with ${result.length} days`);
   return result;
+}
+
+// Get the correct momentum for a daily habit on a specific date
+// This preserves streak momentum when there's no record for the current day
+export async function getDailyHabitMomentumForDate(
+  habitId: string,
+  userId: string,
+  date: string,
+  completed: number = 0
+): Promise<number> {
+  const db = getDb();
+  
+  // If completed, use the standard momentum calculation
+  if (completed > 0) {
+    return calculateDailyHabitMomentum(habitId, userId, date, completed);
+  }
+  
+  // Not completed or no record for today - check previous day's record
+  const yesterday = new Date(date);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayFormatted = formatDateYYYYMMDD(yesterday);
+  
+  const previousRecord = await getHabitRecordForDate(habitId, yesterdayFormatted);
+  
+  // If previous day was completed and had positive momentum, preserve that momentum
+  if (previousRecord && previousRecord.completed > 0 && previousRecord.momentum > 0) {
+    console.log(`Preserving momentum ${previousRecord.momentum} from previous day for habit ${habitId}`);
+    return previousRecord.momentum;
+  }
+  
+  // Otherwise use the standard calculation (which will likely return 0)
+  return calculateDailyHabitMomentum(habitId, userId, date, completed);
 }

@@ -203,18 +203,49 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       
       console.log(`[Daily Habits] Processing habit "${habit.name}": ${todayRecord ? 'has record for today' : 'no record for today'}`);
       
-      // Calculate fresh momentum (this is still expensive but necessary for accuracy)
-      const currentMomentum = todayRecord?.momentum || await calculateDailyHabitMomentum(
-        habit.id,
-        userId,
-        today,
-        todayRecord?.completed || 0
-      );
-      
-      console.log(`[Daily Habits] Current momentum for "${habit.name}": ${currentMomentum}`);
+      // Fix momentum calculation for new days:
+      // If there's no record for today, we should preserve momentum from previous day
+      // rather than resetting it to 0
+      let currentMomentum;
       
       // Get momentum history from our pre-fetched data
       const habitMomentumHistory = momentumHistoryByHabitId[habit.id] || [];
+      
+      // Calculate accumulated momentum by adding all positive momentum values
+      const accumulatedMomentum = habitMomentumHistory
+        .filter(record => record.momentum > 0)
+        .reduce((sum, record) => sum + record.momentum, 0);
+      
+      // If there are no momentum records but we're preserving a streak, add that momentum to the accumulated value
+      let effectiveAccumulatedMomentum = accumulatedMomentum;
+      
+      // For habits with no records today but with streaks from yesterday,
+      // we want to preserve the streak but avoid double-counting
+      if (!todayRecord) {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayFormatted = formatDateYYYYMMDD(yesterday);
+        
+        const previousDayRecord = habitMomentumHistory.find(r => r.date === yesterdayFormatted);
+        
+        if (previousDayRecord && previousDayRecord.completed > 0 && previousDayRecord.momentum > 0) {
+          // Preserve momentum from previous day streak
+          currentMomentum = previousDayRecord.momentum;
+        } else {
+          // Calculate using standard method
+          currentMomentum = await calculateDailyHabitMomentum(
+            habit.id,
+            userId,
+            today,
+            0
+          );
+        }
+      } else {
+        // Use the existing momentum from today's record
+        currentMomentum = todayRecord.momentum;
+      }
+      
+      console.log(`[Daily Habits] Current momentum for "${habit.name}": ${currentMomentum}, Accumulated momentum: ${effectiveAccumulatedMomentum}`);
       
       // Process momentum history to ensure we have exactly 7 data points
       const dates = generateDateRangeArray(sevenDaysAgo, new Date());
@@ -235,6 +266,7 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         ...habit,
         todayRecord: todayRecord || null,
         currentMomentum,
+        accumulatedMomentum,
         momentumHistory
       };
     })

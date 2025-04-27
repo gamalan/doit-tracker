@@ -549,11 +549,11 @@
 									<div class="flex-1">
 										<p class="font-medium text-gray-800">{habit.name}</p>
 										<div class="flex items-center mt-1">
-											<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.currentMomentum || 0)}`}>
-												{habit.currentMomentum || 0}
+											<span class={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${getMomentumClass(habit.accumulatedMomentum || 0)}`}>
+												{habit.accumulatedMomentum || 0}
 											</span>
 											<span class="ml-2 text-xs text-gray-500">
-												{habit.todayRecord?.completed ? 'Completed today' : 'Not completed'}
+												{habit.todayRecord?.completed || habit.isEffectivelyCompleted ? 'Completed today' : 'Not completed'}
 											</span>
 										</div>
 									</div>

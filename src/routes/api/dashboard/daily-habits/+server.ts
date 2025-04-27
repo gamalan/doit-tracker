@@ -1,8 +1,8 @@
 import { json } from '@sveltejs/kit';
-import { getUserHabits, getCurrentDateYYYYMMDD, calculateDailyHabitMomentum } from '$lib/habits';
+import { getUserHabits, getCurrentDateYYYYMMDD, getDailyHabitMomentumForDate, formatDateYYYYMMDD } from '$lib/habits';
 import { getDb } from '$lib/db/client';
 import { habitRecords } from '$lib/db/schema';
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, lte } from 'drizzle-orm';
 
 export const GET = async ({ locals }) => {
   const session = await locals.auth();
@@ -26,7 +26,7 @@ export const GET = async ({ locals }) => {
   // Calculate date for 7 days ago to get all recent records
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const sevenDaysAgoStr = sevenDaysAgo.toISOString().split('T')[0];
+  const sevenDaysAgoStr = formatDateYYYYMMDD(sevenDaysAgo);
   
   console.log(`Getting daily habits from ${sevenDaysAgoStr} to ${today}`);
   
@@ -57,9 +57,9 @@ export const GET = async ({ locals }) => {
           )
         )
     : [];
-  
-  // Also fetch all records for the last 7 days to count total completions
-  const allRecentRecords = habitIds.length > 0
+    
+  // Also fetch all records for the past 7 days to have history for momentum calculation
+  const allHistoryRecords = habitIds.length > 0
     ? await db
         .select()
         .from(habitRecords)
@@ -67,11 +67,14 @@ export const GET = async ({ locals }) => {
           and(
             inArray(habitRecords.habitId, habitIds),
             gte(habitRecords.date, sevenDaysAgoStr),
-            eq(habitRecords.completed, 1)
+            lte(habitRecords.date, today)
           )
         )
     : [];
-    
+  
+  // Also fetch all records for the last 7 days to count total completions
+  const allRecentRecords = allHistoryRecords.filter(record => record.completed > 0);
+  
   console.log(`Found ${allRecentRecords.length} completed daily habit records in the last 7 days`);
   
   // Count completions by habit
@@ -88,28 +91,52 @@ export const GET = async ({ locals }) => {
     todayRecordsByHabitId[record.habitId] = record;
   });
   
+  // Group history records by habit ID
+  const historyByHabitId = {};
+  habitIds.forEach(id => historyByHabitId[id] = []);
+  
+  allHistoryRecords.forEach(record => {
+    if (!historyByHabitId[record.habitId]) {
+      historyByHabitId[record.habitId] = [];
+    }
+    historyByHabitId[record.habitId].push(record);
+  });
+  
   // Process each habit with the pre-fetched data
   const habitsWithRecords = await Promise.all(
     dailyHabits.map(async (habit) => {
       // Get today's record from our pre-fetched data
       const todayRecord = todayRecordsByHabitId[habit.id];
       
-      // Get momentum from record or calculate if needed
-      const currentMomentum = todayRecord?.momentum || await calculateDailyHabitMomentum(
+      // Get momentum with the new helper that preserves streaks
+      const currentMomentum = todayRecord?.momentum || await getDailyHabitMomentumForDate(
         habit.id,
         userId,
         today,
         todayRecord?.completed || 0
       );
       
+      // Get all habit history records to calculate accumulated momentum
+      const habitHistory = historyByHabitId[habit.id] || [];
+      
+      // Calculate accumulated momentum by adding up all positive momentum values
+      const accumulatedMomentum = habitHistory
+        .filter(record => record.momentum > 0)
+        .reduce((sum, record) => sum + record.momentum, 0);
+      
+      // Important: Count a habit as completed if it has positive momentum (preserving streaks)
+      const isEffectivelyCompleted = todayRecord?.completed > 0 || currentMomentum > 0;
+      
       // Get total completions in the last 7 days
       const totalCompletions = completionsByHabit[habit.id] || 0;
-      console.log(`Daily habit "${habit.name}" has ${totalCompletions} total completions in the last 7 days`);
+      console.log(`Daily habit "${habit.name}" has ${totalCompletions} total completions in the last 7 days, currentMomentum=${currentMomentum}, accumulatedMomentum=${accumulatedMomentum}, effectively completed: ${isEffectivelyCompleted}`);
       
       return {
         ...habit,
         todayRecord: todayRecord || null,
         currentMomentum,
+        accumulatedMomentum,
+        isEffectivelyCompleted,
         totalCompletions
       };
     })

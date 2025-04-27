@@ -400,40 +400,17 @@ export const actions: Actions = {
       
       console.log(`WEEKLY TRACKING: Calculated momentum for habit ${habit.name}: ${momentum}`);
       
-      // Create or update the record for this date
-      let recordResult;
+      // Create or update the record for this date - always use createOrUpdateHabitRecord
+      // to ensure accumulated momentum is properly updated
+      const recordResult = await createOrUpdateHabitRecord({
+        habitId,
+        userId,
+        date,
+        completed,
+        momentum
+      });
       
-      if (existingRecord) {
-        // Update the existing record
-        const [updated] = await db
-          .update(habitRecords)
-          .set({ 
-            completed, 
-            momentum,
-            updatedAt: new Date()
-          })
-          .where(
-            and(
-              eq(habitRecords.id, existingRecord.id),
-              eq(habitRecords.habitId, habitId)
-            )
-          )
-          .returning();
-        
-        recordResult = updated;
-        console.log('WEEKLY TRACKING: Updated record:', recordResult);
-      } else {
-        // Create a new record using proper createOrUpdateHabitRecord to update accumulated momentum
-        recordResult = await createOrUpdateHabitRecord({
-          habitId,
-          userId,
-          date,
-          completed,
-          momentum
-        });
-        
-        console.log('WEEKLY TRACKING: Created new record:', recordResult);
-      }
+      console.log('WEEKLY TRACKING: Updated/created record:', recordResult);
       
       // For weekly habits, we need to update ALL records for this week with the new momentum
       // This ensures consistency in momentum across the week

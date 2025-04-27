@@ -404,11 +404,11 @@
               {/if}
             </div>
             
-            <!-- Momentum badge - Display accumulated momentum instead of current momentum -->
+            <!-- Momentum badge - Display current momentum instead of accumulated momentum -->
             <span 
-              class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMomentumClass(habit.accumulatedMomentum || 0)}`}
+              class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getMomentumClass(habit.currentMomentum || 0)}`}
             >
-              {habit.accumulatedMomentum || 0}
+              {habit.currentMomentum || 0}
             </span>
           </div>
           

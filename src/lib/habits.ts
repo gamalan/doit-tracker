@@ -202,15 +202,12 @@ export async function createOrUpdateHabitRecord({
       console.log(`Created new record:`, updatedRecord);
     }
     
-    // Calculate the net change in momentum
-    const newMomentum = updatedRecord.momentum || 0;
-    const netChange = newMomentum - oldMomentum;
-    
-    // Only update accumulated momentum if there's a change
-    if (netChange !== 0) {
-      // Update the habit's accumulated momentum
-      const newAccumulatedMomentum = (habit.accumulatedMomentum || 0) + netChange;
-      console.log(`Updating habit's accumulated momentum: ${habit.accumulatedMomentum || 0} + ${netChange} = ${newAccumulatedMomentum}`);
+    // Handle weekly and daily habits differently when updating accumulated momentum
+    if (habit.type === 'weekly') {
+      // For weekly habits, set accumulated momentum equal to current momentum
+      // This ensures weekly habits don't accumulate momentum incorrectly with each tracking
+      const newAccumulatedMomentum = momentum || 0;
+      console.log(`Weekly habit: setting accumulated momentum to current momentum: ${newAccumulatedMomentum}`);
       
       await db
         .update(habits)
@@ -218,6 +215,24 @@ export async function createOrUpdateHabitRecord({
           accumulatedMomentum: newAccumulatedMomentum
         })
         .where(eq(habits.id, habitId));
+    } else {
+      // For daily habits, use the existing delta-based logic
+      const newMomentum = updatedRecord.momentum || 0;
+      const netChange = newMomentum - oldMomentum;
+      
+      // Only update accumulated momentum if there's a change
+      if (netChange !== 0) {
+        // Update the habit's accumulated momentum
+        const newAccumulatedMomentum = (habit.accumulatedMomentum || 0) + netChange;
+        console.log(`Daily habit: updating accumulated momentum: ${habit.accumulatedMomentum || 0} + ${netChange} = ${newAccumulatedMomentum}`);
+        
+        await db
+          .update(habits)
+          .set({ 
+            accumulatedMomentum: newAccumulatedMomentum
+          })
+          .where(eq(habits.id, habitId));
+      }
     }
     
     return updatedRecord;

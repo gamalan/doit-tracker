@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS habits (
   description TEXT,
   type TEXT NOT NULL CHECK(type IN ('daily', 'weekly')),
   target_count INTEGER DEFAULT 1,
+  accumulated_momentum INTEGER DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   archived_at TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -38,3 +39,37 @@ CREATE UNIQUE INDEX IF NOT EXISTS habit_records_habit_date_idx ON habit_records(
 CREATE INDEX IF NOT EXISTS habits_user_id_idx ON habits(user_id);
 CREATE INDEX IF NOT EXISTS habit_records_user_id_idx ON habit_records(user_id);
 CREATE INDEX IF NOT EXISTS habit_records_date_idx ON habit_records(date);
+
+-- Add accumulated_momentum column if it doesn't exist
+-- This allows migration for existing databases
+PRAGMA foreign_keys=off;
+BEGIN TRANSACTION;
+
+-- Create temporary table with the new structure
+CREATE TABLE IF NOT EXISTS habits_new (
+  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  type TEXT NOT NULL CHECK(type IN ('daily', 'weekly')),
+  target_count INTEGER DEFAULT 1,
+  accumulated_momentum INTEGER DEFAULT 0,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  archived_at TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+-- Copy all data from the original table
+INSERT INTO habits_new
+SELECT id, user_id, name, description, type, target_count, 0 as accumulated_momentum, created_at, archived_at
+FROM habits;
+
+-- Drop the original table and rename the new one
+DROP TABLE IF EXISTS habits;
+ALTER TABLE habits_new RENAME TO habits;
+
+-- Recreate indexes
+CREATE INDEX IF NOT EXISTS habits_user_id_idx ON habits(user_id);
+
+COMMIT;
+PRAGMA foreign_keys=on;

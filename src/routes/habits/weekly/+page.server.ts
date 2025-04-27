@@ -170,6 +170,11 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         currentWeek.end
       );
 
+      // Use the habit's stored accumulated momentum
+      const accumulatedMomentum = habit.accumulatedMomentum || 0;
+      
+      console.log(`Weekly habit "${habit.name}" current momentum: ${currentMomentum}, accumulated momentum: ${accumulatedMomentum}`);
+
       // Process momentum history using pre-fetched data
       const habitMomentumRecords = momentumHistoryByHabitId[habit.id] || [];
       
@@ -230,6 +235,7 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         targetMet: completions >= (habit.targetCount || 2),
         latestRecord,
         currentMomentum,
+        accumulatedMomentum,
         momentumHistory,
       };
     })
@@ -417,22 +423,15 @@ export const actions: Actions = {
         recordResult = updated;
         console.log('WEEKLY TRACKING: Updated record:', recordResult);
       } else {
-        // Create a new record
-        const [newRecord] = await db
-          .insert(habitRecords)
-          .values({
-            id: habitId + "-" + date, // Use a deterministic ID 
-            habitId,
-            userId,
-            date,
-            completed,
-            momentum,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          })
-          .returning();
+        // Create a new record using proper createOrUpdateHabitRecord to update accumulated momentum
+        recordResult = await createOrUpdateHabitRecord({
+          habitId,
+          userId,
+          date,
+          completed,
+          momentum
+        });
         
-        recordResult = newRecord;
         console.log('WEEKLY TRACKING: Created new record:', recordResult);
       }
       

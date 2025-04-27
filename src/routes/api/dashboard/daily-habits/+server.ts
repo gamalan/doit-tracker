@@ -116,13 +116,8 @@ export const GET = async ({ locals }) => {
         todayRecord?.completed || 0
       );
       
-      // Get all habit history records to calculate accumulated momentum
-      const habitHistory = historyByHabitId[habit.id] || [];
-      
-      // Calculate accumulated momentum by adding up all positive momentum values
-      const accumulatedMomentum = habitHistory
-        .filter(record => record.momentum > 0)
-        .reduce((sum, record) => sum + record.momentum, 0);
+      // Use the habit's stored accumulated momentum instead of calculating on the fly
+      const accumulatedMomentum = habit.accumulatedMomentum || 0;
       
       // Important: Count a habit as completed if it has positive momentum (preserving streaks)
       const isEffectivelyCompleted = todayRecord?.completed > 0 || currentMomentum > 0;

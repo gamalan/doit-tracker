@@ -18,6 +18,7 @@ export const habits = sqliteTable('habits', {
   description: text('description'),
   type: text('type', { enum: ['daily', 'weekly'] }).notNull(),
   targetCount: integer('target_count').default(1),
+  accumulatedMomentum: integer('accumulated_momentum').default(0), // Added field to store permanent momentum
   createdAt: integer('created_at', { mode: 'timestamp' }).default(sql`CURRENT_TIMESTAMP`),
   archivedAt: integer('archived_at', { mode: 'timestamp' })
 });

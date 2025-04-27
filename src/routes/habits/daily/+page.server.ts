@@ -211,13 +211,8 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       // Get momentum history from our pre-fetched data
       const habitMomentumHistory = momentumHistoryByHabitId[habit.id] || [];
       
-      // Calculate accumulated momentum by adding all positive momentum values
-      const accumulatedMomentum = habitMomentumHistory
-        .filter(record => record.momentum > 0)
-        .reduce((sum, record) => sum + record.momentum, 0);
-      
-      // If there are no momentum records but we're preserving a streak, add that momentum to the accumulated value
-      let effectiveAccumulatedMomentum = accumulatedMomentum;
+      // Use the habit's stored accumulated momentum instead of calculating it each time
+      const accumulatedMomentum = habit.accumulatedMomentum || 0;
       
       // For habits with no records today but with streaks from yesterday,
       // we want to preserve the streak but avoid double-counting
@@ -245,7 +240,7 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         currentMomentum = todayRecord.momentum;
       }
       
-      console.log(`[Daily Habits] Current momentum for "${habit.name}": ${currentMomentum}, Accumulated momentum: ${effectiveAccumulatedMomentum}`);
+      console.log(`[Daily Habits] Current momentum for "${habit.name}": ${currentMomentum}, Accumulated momentum: ${accumulatedMomentum}`);
       
       // Process momentum history to ensure we have exactly 7 data points
       const dates = generateDateRangeArray(sevenDaysAgo, new Date());

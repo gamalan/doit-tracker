@@ -150,11 +150,24 @@ export async function createOrUpdateHabitRecord({
     // Check if record already exists
     const existingRecord = await getHabitRecordForDate(habitId, standardDate);
     
+    // Get the habit to update its accumulated momentum
+    const habit = await getHabitById(habitId);
+    if (!habit) {
+      throw new Error(`Habit with ID ${habitId} not found`);
+    }
+    
+    const momentumChange = momentum !== null ? momentum : 0;
+    let oldMomentum = 0;
+    let updatedRecord;
+    
     if (existingRecord) {
       console.log(`Updating existing record for ${standardDate}`);
       
+      // Calculate momentum change (new momentum - old momentum)
+      oldMomentum = existingRecord.momentum || 0;
+      
       // Update existing record
-      const [updated] = await db
+      [updatedRecord] = await db
         .update(habitRecords)
         .set({ 
           completed, 
@@ -168,13 +181,12 @@ export async function createOrUpdateHabitRecord({
         )
         .returning();
       
-      console.log(`Updated record:`, updated);
-      return updated;
+      console.log(`Updated record:`, updatedRecord);
     } else {
       console.log(`Creating new record for ${standardDate}`);
       
       // Create new record
-      const [newRecord] = await db
+      [updatedRecord] = await db
         .insert(habitRecords)
         .values({
           id: nanoid(),
@@ -187,9 +199,28 @@ export async function createOrUpdateHabitRecord({
         })
         .returning();
       
-      console.log(`Created new record:`, newRecord);
-      return newRecord;
+      console.log(`Created new record:`, updatedRecord);
     }
+    
+    // Calculate the net change in momentum
+    const newMomentum = updatedRecord.momentum || 0;
+    const netChange = newMomentum - oldMomentum;
+    
+    // Only update accumulated momentum if there's a change
+    if (netChange !== 0) {
+      // Update the habit's accumulated momentum
+      const newAccumulatedMomentum = (habit.accumulatedMomentum || 0) + netChange;
+      console.log(`Updating habit's accumulated momentum: ${habit.accumulatedMomentum || 0} + ${netChange} = ${newAccumulatedMomentum}`);
+      
+      await db
+        .update(habits)
+        .set({ 
+          accumulatedMomentum: newAccumulatedMomentum
+        })
+        .where(eq(habits.id, habitId));
+    }
+    
+    return updatedRecord;
   } catch (error) {
     console.error('Error creating/updating habit record:', error);
     throw error;

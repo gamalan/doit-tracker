@@ -101,6 +101,11 @@ export const GET = async ({ locals }) => {
         currentWeek.end
       );
       
+      // Use the habit's stored accumulated momentum
+      const accumulatedMomentum = habit.accumulatedMomentum || 0;
+      
+      console.log(`Weekly habit "${habit.name}" current momentum: ${currentMomentum}, accumulated momentum: ${accumulatedMomentum}`);
+      
       // Also set a flag directly to indicate if the habit has any records this week
       const hasRecordsThisWeek = records.length > 0;
       
@@ -110,6 +115,7 @@ export const GET = async ({ locals }) => {
         targetMet: completions >= (habit.targetCount || 2),
         latestRecord,
         currentMomentum,
+        accumulatedMomentum,
         hasRecordsThisWeek, // Add this flag to make it very clear if the habit has been tracked
         weekRecords: records // Include the full records for debugging if needed
       };

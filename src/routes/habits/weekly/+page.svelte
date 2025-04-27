@@ -1,7 +1,7 @@
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { page } from "$app/stores";
-  import { invalidate } from "$app/navigation";
+  import { invalidat,invalidateAll } from "$app/navigation";
   import { onMount } from 'svelte';
 
   // Access the habits and current week data from the page load function
@@ -314,10 +314,7 @@
                 newHabitTargetCount = 2;
                 formError = "";
                 // More comprehensive invalidation
-                await invalidate('app:habits');
-                await invalidate('weekly-habits');
-                await invalidate('/habits/weekly');
-                await invalidate('/dashboard');
+                await invalidateAll();
               } else if (result.data?.error) {
                 formError = result.data.error;
               }
@@ -588,13 +585,7 @@
                         console.log('Weekly tracking success:', result);
                         
                         // Add more aggressive data invalidation
-                        await invalidate('app:habits');
-                        await invalidate('weekly-habits'); 
-                        await invalidate('/habits/weekly');
-                        await invalidate('/dashboard');
-                        
-                        // Force page reload to ensure UI is updated
-                        window.location.reload();
+                        await invalidateAll();
                       } else {
                         console.error('Weekly tracking error:', result);
                       }
@@ -635,10 +626,7 @@
                 return async ({ result }) => {
                   if (result.type === 'success' && result.data?.success) {
                     // More comprehensive invalidation
-                    await invalidate('app:habits');
-                    await invalidate('weekly-habits'); 
-                    await invalidate('/habits/weekly');
-                    await invalidate('/dashboard');
+                   await invalidateAll();
                   }
                 };
               }}

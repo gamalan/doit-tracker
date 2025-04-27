@@ -1,7 +1,7 @@
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { page } from "$app/stores";
-  import { invalidate } from "$app/navigation";
+  import { invalidate, invalidateAll } from "$app/navigation";
   import { onMount } from 'svelte';
 
   // Access the habits data from the page load function
@@ -246,10 +246,7 @@
                 newHabitDescription = "";
                 formError = "";
                 // More comprehensive invalidation
-                await invalidate('app:habits');
-                await invalidate('daily-habits');
-                await invalidate('/habits/daily');
-                await invalidate('/dashboard');
+                await invalidateAll();
               } else if (result.data?.error) {
                 formError = result.data.error;
               }
@@ -482,15 +479,7 @@
                     console.log('[Form] Habit tracking successful:', data);
                     
                     // Invalidate multiple dependency paths to ensure all data is refreshed
-                    await invalidate('app:habits');
-                    await invalidate('daily-habits');
-                    await invalidate('app:momentum'); 
-                    await invalidate('/habits/daily');
-                    await invalidate('/dashboard');
-                    
-                    // Force a hard reload to ensure the browser gets a completely fresh state
-                    console.log('[Form] Forcing page reload to ensure fresh data');
-                    window.location.reload();
+                    await invalidateAll();
                   } else {
                     console.error('[Form] Habit tracking error:', result);
                   }
@@ -534,10 +523,7 @@
                 return async ({ result }) => {
                   if (result.type === 'success' && result.data?.success) {
                     // More comprehensive invalidation
-                    await invalidate('app:habits');
-                    await invalidate('daily-habits');
-                    await invalidate('/habits/daily');
-                    await invalidate('/dashboard');
+                    await invalidateAll();
                   }
                 };
               }}

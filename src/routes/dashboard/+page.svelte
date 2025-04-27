@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { enhance } from "$app/forms";
-	import { invalidate } from "$app/navigation";
+	import { invalidate, invalidateAll } from "$app/navigation";
 	import { onMount, onDestroy } from 'svelte';
 	import { browser } from '$app/environment';
 	
@@ -566,10 +566,7 @@
 												return async ({ result }) => {
 													if (result.type === 'success') {
 														// Manual reload to refresh all API data
-														await invalidate('app:habits');
-														await invalidate('daily-habits');
-														await invalidate('/dashboard');
-														await invalidate('/habits/daily');
+														invalidateAll();
 														triggerDataReload();
 													}
 												};

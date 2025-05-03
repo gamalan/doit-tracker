@@ -156,9 +156,115 @@ export async function createOrUpdateHabitRecord({
       throw new Error(`Habit with ID ${habitId} not found`);
     }
     
-    const momentumChange = momentum !== null ? momentum : 0;
+    let momentumToApply = momentum;
     let oldMomentum = 0;
     let updatedRecord;
+    // Track any missed days penalty for accumulated momentum
+    let missedDaysPenalty = 0;
+    
+    if (habit.type === 'daily') {
+      // For daily habits, find the most recent record to check for missed days
+      const lastRecord = await db
+        .select()
+        .from(habitRecords)
+        .where(
+          and(
+            eq(habitRecords.habitId, habitId),
+            lt(habitRecords.date, standardDate)
+          )
+        )
+        .orderBy(desc(habitRecords.date))
+        .limit(1);
+        
+      const lastRecordEntry = lastRecord[0];
+      
+      // If we have a previous record and momentum isn't explicitly provided
+      if (lastRecordEntry && momentum === null) {
+        const lastDate = new Date(lastRecordEntry.date);
+        const currentDate = new Date(standardDate);
+        
+        // Calculate the gap between the last record and current date (in days)
+        const dayGap = Math.floor((currentDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        console.log(`Last record was on ${lastRecordEntry.date}, current date is ${standardDate}, gap: ${dayGap} days`);
+        
+        if (dayGap > 1) {
+          // Handle the gap in tracking
+          console.log(`Found gap of ${dayGap} days in tracking for habit ${habitId}`);
+          
+          // Calculate missed days penalty for accumulated momentum
+          if (lastRecordEntry.momentum > 0) {
+            // If previous momentum was positive, we need to account for resetting to 0
+            missedDaysPenalty = -lastRecordEntry.momentum;
+            console.log(`Penalty for breaking positive streak: ${missedDaysPenalty}`);
+            
+            // Additionally, if there are more missed days and the streak would go negative
+            const additionalPenaltyDays = dayGap - 2; // -2 because we already counted the first day's reset to 0
+            if (additionalPenaltyDays > 0) {
+              const additionalPenalty = Math.min(additionalPenaltyDays, 30); // Cap at -30
+              missedDaysPenalty -= additionalPenalty;
+              console.log(`Additional penalty for ${additionalPenaltyDays} more missed days: -${additionalPenalty}`);
+            }
+          } else {
+            // If already negative, further decrease for each missed day
+            const additionalPenalty = Math.min(dayGap - 1, 30); // Limit penalty to max 30 days
+            missedDaysPenalty = -additionalPenalty;
+            console.log(`Penalty for ${dayGap-1} missed days when already negative: ${missedDaysPenalty}`);
+          }
+          
+          // If completing today after a gap, calculate appropriate momentum
+          if (completed > 0) {
+            // Missing days breaks the streak, so start at +1 regardless of previous momentum
+            momentumToApply = 1;
+            console.log(`Missed ${dayGap-1} days, breaking streak. New momentum: +1`);
+          } else {
+            // Not completed after gap
+            let penaltyMomentum = lastRecordEntry.momentum;
+            
+            // Apply penalties for each missed day (simplified to avoid excessive penalties)
+            if (penaltyMomentum > 0) {
+              // If positive momentum, first reset to 0
+              penaltyMomentum = 0;
+              console.log(`Positive streak broken, resetting momentum to 0`);
+            }
+            
+            // Then decrease by 1 for each additional missed day (including today)
+            // Cap at minimum -30
+            const additionalPenalty = Math.min(dayGap, 30); // Limit penalty to max 30 days
+            penaltyMomentum = Math.max(penaltyMomentum - additionalPenalty, -30);
+            console.log(`Applied penalty for missed days: ${penaltyMomentum}`);
+            
+            momentumToApply = penaltyMomentum;
+          }
+        } else if (completed > 0) {
+          // Normal consecutive day tracking - calculate streak momentum
+          if (lastRecordEntry.completed > 0) {
+            // Continue streak
+            momentumToApply = Math.min(lastRecordEntry.momentum + 1, 30); // Cap at +30
+            console.log(`Continuing streak, momentum: ${momentumToApply}`);
+          } else {
+            // Previous day not completed, start new streak
+            momentumToApply = 1;
+            console.log(`Starting new streak, momentum: +1`);
+          }
+        } else {
+          // Not completed today, after completing yesterday
+          if (lastRecordEntry.momentum > 0) {
+            // Reset positive momentum to 0
+            momentumToApply = 0;
+            console.log(`Not completed today, resetting momentum to 0`);
+          } else {
+            // Continue decreasing negative momentum
+            momentumToApply = Math.max(lastRecordEntry.momentum - 1, -30); // Cap at -30
+            console.log(`Not completed today, decreasing momentum to ${momentumToApply}`);
+          }
+        }
+      } else if (momentum === null) {
+        // No previous records, use default momentum based on completion
+        momentumToApply = completed > 0 ? 1 : 0;
+        console.log(`No previous records found, setting initial momentum to ${momentumToApply}`);
+      }
+    }
     
     if (existingRecord) {
       console.log(`Updating existing record for ${standardDate}`);
@@ -171,7 +277,7 @@ export async function createOrUpdateHabitRecord({
         .update(habitRecords)
         .set({ 
           completed, 
-          momentum: momentum !== null ? momentum : existingRecord.momentum
+          momentum: momentumToApply !== null ? momentumToApply : existingRecord.momentum
         })
         .where(
           and(
@@ -194,7 +300,7 @@ export async function createOrUpdateHabitRecord({
           userId,
           date: standardDate,
           completed,
-          momentum: momentum || 0,
+          momentum: momentumToApply !== null ? momentumToApply : 0,
           createdAt: new Date()
         })
         .returning();
@@ -206,7 +312,7 @@ export async function createOrUpdateHabitRecord({
     if (habit.type === 'weekly') {
       // For weekly habits, set accumulated momentum equal to current momentum
       // This ensures weekly habits don't accumulate momentum incorrectly with each tracking
-      const newAccumulatedMomentum = momentum || 0;
+      const newAccumulatedMomentum = updatedRecord.momentum || 0;
       console.log(`Weekly habit: setting accumulated momentum to current momentum: ${newAccumulatedMomentum}`);
       
       await db
@@ -220,11 +326,18 @@ export async function createOrUpdateHabitRecord({
       const newMomentum = updatedRecord.momentum || 0;
       const netChange = newMomentum - oldMomentum;
       
+      // Apply missed days penalty to accumulated momentum calculation
+      let totalChange = netChange;
+      if (missedDaysPenalty !== 0) {
+        totalChange += missedDaysPenalty;
+        console.log(`Including missed days penalty ${missedDaysPenalty} in accumulated momentum calculation`);
+      }
+      
       // Only update accumulated momentum if there's a change
-      if (netChange !== 0) {
+      if (totalChange !== 0) {
         // Update the habit's accumulated momentum
-        const newAccumulatedMomentum = (habit.accumulatedMomentum || 0) + netChange;
-        console.log(`Daily habit: updating accumulated momentum: ${habit.accumulatedMomentum || 0} + ${netChange} = ${newAccumulatedMomentum}`);
+        const newAccumulatedMomentum = Math.max((habit.accumulatedMomentum || 0) + totalChange, 0);
+        console.log(`Daily habit: updating accumulated momentum: ${habit.accumulatedMomentum || 0} + ${totalChange} = ${newAccumulatedMomentum}`);
         
         await db
           .update(habits)

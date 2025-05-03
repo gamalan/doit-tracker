@@ -389,25 +389,21 @@ export const actions: Actions = {
       const existingRecord = await getHabitRecordForDate(habitId, today);
       console.log(`[TRACK] Existing record:`, existingRecord);
       
-      // Calculate momentum based on completion status
-      const momentum = await calculateDailyHabitMomentum(habitId, session.user.id, today, completed);
-      console.log(`[TRACK] Calculated momentum: ${momentum}`);
-      
-      // Create or update the record for today
+      // Use createOrUpdateHabitRecord directly, which now contains the proper punishment logic
+      // The momentum will be calculated internally based on the habit's tracking history
       const updatedRecord = await createOrUpdateHabitRecord({
         habitId,
         userId: session.user.id,
         date: today,
-        completed,
-        momentum
+        completed
       });
       
       console.log(`[TRACK] Updated record:`, updatedRecord);
       
-      // Return the updated momentum value explicitly for client-side update
+      // Return the updated momentum from the record
       return { 
         success: true, 
-        momentum,
+        momentum: updatedRecord.momentum,
         completed,
         updatedAt: new Date().toISOString()
       };

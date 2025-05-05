@@ -154,8 +154,15 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         console.log(`Record: date=${record.date}, completed=${record.completed}, momentum=${record.momentum}`);
       });
       
-      // Count completions
-      const completions = records.reduce((sum, record) => sum + record.completed, 0);
+      // Count completions for the current week only
+      const completionsThisWeek = records
+        .filter(record => {
+          const recordDate = record.date;
+          return recordDate >= currentWeek.start && 
+                 recordDate <= currentWeek.end && 
+                 record.completed > 0;
+        })
+        .length;
       
       // Find the latest record (for momentum)
       const latestRecord = records.sort((a, b) => 
@@ -173,6 +180,8 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       // Use the habit's stored accumulated momentum
       const accumulatedMomentum = habit.accumulatedMomentum || 0;
       
+      console.log(`Weekly habit "${habit.name}" (${habit.id}): ${completionsThisWeek} completions this week`);
+      console.log(`Final momentum for "${habit.name}" (${habit.id}): ${currentMomentum}`);
       console.log(`Weekly habit "${habit.name}" current momentum: ${currentMomentum}, accumulated momentum: ${accumulatedMomentum}`);
 
       // Process momentum history using pre-fetched data
@@ -187,11 +196,25 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
       // Group records by week to get a single data point per week
       const weeklyMomentumMap = new Map();
       
+      // First, ensure we have the current week in our map with the current momentum
+      const currentWeekStart = new Date(currentWeek.start);
+      const currentWeekKey = formatDateYYYYMMDD(currentWeekStart);
+      
+      // Add the current week with the current momentum (even if zero)
+      weeklyMomentumMap.set(currentWeekKey, {
+        date: currentWeek.start,
+        momentum: currentMomentum
+      });
+      
+      // Process historical records
       formattedMomentumRecords.forEach(record => {
         const recordDate = new Date(record.date);
         const weekStart = new Date(recordDate);
         weekStart.setDate(weekStart.getDate() - weekStart.getDay()); // Start of week (Sunday)
         const weekKey = formatDateYYYYMMDD(weekStart);
+        
+        // Skip if this is the current week (we already added it)
+        if (weekKey === currentWeekKey) return;
         
         // Only keep the latest record for each week
         if (!weeklyMomentumMap.has(weekKey) || 
@@ -212,7 +235,7 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         // Add null momentum for missing weeks at the beginning
         const earliestDate = momentumHistory.length > 0 
           ? new Date(momentumHistory[0].date) 
-          : new Date();
+          : new Date(currentWeek.start);
         
         const prevWeekDate = new Date(earliestDate);
         prevWeekDate.setDate(prevWeekDate.getDate() - 7);
@@ -228,11 +251,18 @@ export const load: PageServerLoad = async ({ locals, depends }) => {
         momentumHistory = momentumHistory.slice(-8);
       }
       
+      // Log the date range for debugging
+      if (momentumHistory.length > 0) {
+        console.log(`Momentum history for "${habit.name}" spans from ${momentumHistory[0].date} to ${momentumHistory[momentumHistory.length-1].date}`);
+      }
+      
       return {
         ...habit,
-        weekRecords: records,
-        completionsThisWeek: completions,
-        targetMet: completions >= (habit.targetCount || 2),
+        weekRecords: records.filter(record => 
+          record.date >= currentWeek.start && record.date <= currentWeek.end
+        ), // Filter to only include current week records for display
+        completionsThisWeek,
+        targetMet: completionsThisWeek >= (habit.targetCount || 2),
         latestRecord,
         currentMomentum,
         accumulatedMomentum,

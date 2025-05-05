@@ -1,7 +1,7 @@
 <script lang="ts">
   import { enhance } from "$app/forms";
   import { page } from "$app/stores";
-  import { invalidat,invalidateAll } from "$app/navigation";
+  import { invalidateAll } from "$app/navigation";
   import { onMount } from 'svelte';
 
   // Access the habits and current week data from the page load function
@@ -95,37 +95,18 @@
   // Find if a habit was completed on a specific date
   const isCompletedOnDate = (habit: any, dateStr: string): boolean => {
     if (!habit.weekRecords) {
-      console.log(`No weekRecords for habit ${habit.name}`);
       return false;
     }
     
     // Standardize the date format for comparison (ensure YYYY-MM-DD format)
     const standardDateStr = dateStr.split('T')[0];
     
-    console.log(`Checking if habit ${habit.name} was completed on ${standardDateStr}`, habit.weekRecords);
-    
-    // Log all the record dates for debugging
-    console.log(`Available dates for ${habit.name}:`, 
-      habit.weekRecords.map(r => ({ 
-        date: r.date, 
-        standardized: r.date ? r.date.split('T')[0] : r.date,
-        completed: r.completed
-      }))
-    );
-    
-    const isCompleted = habit.weekRecords.some((record: any) => {
+    // Only check records for the current week
+    return habit.weekRecords.some((record: any) => {
       // Standardize record date format too
       const recordDateStr = record.date ? record.date.split('T')[0] : record.date;
-      const matches = recordDateStr === standardDateStr;
-      const isComplete = record.completed > 0;
-      
-      console.log(`Compare: [${recordDateStr}] vs [${standardDateStr}], Matches: ${matches}, Completed: ${isComplete}`);
-      
-      return matches && isComplete;
+      return recordDateStr === standardDateStr && record.completed > 0;
     });
-    
-    console.log(`Habit ${habit.name} completed on ${standardDateStr}: ${isCompleted}`);
-    return isCompleted;
   };
 
   const getMomentumClass = (momentum: number) => {

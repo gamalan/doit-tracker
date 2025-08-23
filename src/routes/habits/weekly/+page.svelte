@@ -115,7 +115,7 @@
     if (momentum > 10) return "text-green-400";
     if (momentum > 0) return "text-green-300";
     if (momentum === 0) return "text-gray-500";
-    if (momentum > -20) return "text-orange-400";
+    if (momentum > -15) return "text-orange-400";
     if (momentum > -30) return "text-orange-500";
     return "text-red-500";
   };
@@ -127,7 +127,7 @@
     if (momentum > 10) return "#34d399"; // green-400
     if (momentum > 0) return "#a7f3d0"; // green-300
     if (momentum === 0) return "#6b7280"; // gray-500
-    if (momentum > -20) return "#fb923c"; // orange-400
+    if (momentum > -15) return "#fb923c"; // orange-400
     if (momentum > -30) return "#f97316"; // orange-500
     return "#ef4444"; // red-500
   };

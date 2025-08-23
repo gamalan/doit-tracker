@@ -132,14 +132,14 @@
 		}
 	});
 
-	// Momentum utility functions
+	// Momentum utility functions for daily habits (range: +7 to -3)
 	const getMomentumClass = (momentum: number) => {
-		if (momentum > 20) return "text-green-600";
-		if (momentum > 10) return "text-green-500";
+		if (momentum > 5) return "text-green-600";
+		if (momentum > 3) return "text-green-500";
 		if (momentum > 0) return "text-green-400";
 		if (momentum === 0) return "text-gray-500";
-		if (momentum > -10) return "text-orange-400";
-		if (momentum > -20) return "text-orange-500";
+		if (momentum > -2) return "text-orange-400";
+		if (momentum > -3) return "text-orange-500";
 		return "text-red-500";
 	};
 

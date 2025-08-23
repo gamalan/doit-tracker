@@ -1,6 +1,6 @@
 import { getDb } from './db/client';
 import { habits, habitRecords, users } from './db/schema';
-import { eq, and, sql, desc, gte, lte, lt } from 'drizzle-orm';
+import { eq, and, sql, desc, gte, lte, lt, inArray } from 'drizzle-orm';
 import { nanoid } from 'nanoid';
 
 // Type definitions
@@ -189,58 +189,24 @@ export async function createOrUpdateHabitRecord({
         console.log(`Last record was on ${lastRecordEntry.date}, current date is ${standardDate}, gap: ${dayGap} days`);
         
         if (dayGap > 1) {
-          // Handle the gap in tracking
+          // Simplified missing day logic according to requirements
           console.log(`Found gap of ${dayGap} days in tracking for habit ${habitId}`);
           
-          // Calculate missed days penalty for accumulated momentum
-          if (lastRecordEntry.momentum > 0) {
-            // If previous momentum was positive, we need to account for resetting to 0
-            missedDaysPenalty = -lastRecordEntry.momentum;
-            console.log(`Penalty for breaking positive streak: ${missedDaysPenalty}`);
-            
-            // Additionally, if there are more missed days and the streak would go negative
-            const additionalPenaltyDays = dayGap - 2; // -2 because we already counted the first day's reset to 0
-            if (additionalPenaltyDays > 0) {
-              const additionalPenalty = Math.min(additionalPenaltyDays, 30); // Cap at -30
-              missedDaysPenalty -= additionalPenalty;
-              console.log(`Additional penalty for ${additionalPenaltyDays} more missed days: -${additionalPenalty}`);
-            }
-          } else {
-            // If already negative, further decrease for each missed day
-            const additionalPenalty = Math.min(dayGap - 1, 30); // Limit penalty to max 30 days
-            missedDaysPenalty = -additionalPenalty;
-            console.log(`Penalty for ${dayGap-1} missed days when already negative: ${missedDaysPenalty}`);
-          }
-          
-          // If completing today after a gap, calculate appropriate momentum
           if (completed > 0) {
-            // Missing days breaks the streak, so start at +1 regardless of previous momentum
+            // If completing today after missing days, reset to +1
             momentumToApply = 1;
-            console.log(`Missed ${dayGap-1} days, breaking streak. New momentum: +1`);
+            console.log(`Completing after ${dayGap-1} missed days. Resetting momentum to +1`);
           } else {
-            // Not completed after gap
-            let penaltyMomentum = lastRecordEntry.momentum;
-            
-            // Apply penalties for each missed day (simplified to avoid excessive penalties)
-            if (penaltyMomentum > 0) {
-              // If positive momentum, first reset to 0
-              penaltyMomentum = 0;
-              console.log(`Positive streak broken, resetting momentum to 0`);
-            }
-            
-            // Then decrease by 1 for each additional missed day (including today)
-            // Cap at minimum -30
-            const additionalPenalty = Math.min(dayGap, 30); // Limit penalty to max 30 days
-            penaltyMomentum = Math.max(penaltyMomentum - additionalPenalty, -30);
-            console.log(`Applied penalty for missed days: ${penaltyMomentum}`);
-            
-            momentumToApply = penaltyMomentum;
+            // Not completed and missed previous days - apply penalty
+            // Start from 0 (streak broken) and subtract 1 for each consecutive miss (min -3)
+            momentumToApply = Math.max(-dayGap, -3);
+            console.log(`Not completed after ${dayGap} total missed days. Momentum: ${momentumToApply}`);
           }
         } else if (completed > 0) {
           // Normal consecutive day tracking - calculate streak momentum
           if (lastRecordEntry.completed > 0) {
             // Continue streak
-            momentumToApply = Math.min(lastRecordEntry.momentum + 1, 30); // Cap at +30
+            momentumToApply = Math.min(lastRecordEntry.momentum + 1, 7); // Cap at +7
             console.log(`Continuing streak, momentum: ${momentumToApply}`);
           } else {
             // Previous day not completed, start new streak
@@ -255,7 +221,7 @@ export async function createOrUpdateHabitRecord({
             console.log(`Not completed today, resetting momentum to 0`);
           } else {
             // Continue decreasing negative momentum
-            momentumToApply = Math.max(lastRecordEntry.momentum - 1, -30); // Cap at -30
+            momentumToApply = Math.max(lastRecordEntry.momentum - 1, -3); // Cap at -3
             console.log(`Not completed today, decreasing momentum to ${momentumToApply}`);
           }
         }
@@ -358,7 +324,7 @@ export async function createOrUpdateHabitRecord({
 // Momentum calculation functions
 export async function calculateDailyHabitMomentum(
   habitId: string,
-  userId: string,
+  _userId: string,
   date: string,
   completed: number
 ): Promise<number> {
@@ -375,7 +341,7 @@ export async function calculateDailyHabitMomentum(
     
     if (previousRecord && previousRecord.completed > 0) {
       // If the previous day was completed, increase momentum (streak)
-      momentum = Math.min(previousRecord.momentum + 1, 30); // Cap at +30
+      momentum = Math.min(previousRecord.momentum + 1, 7); // Cap at +7
     } else {
       // No streak or broken streak, start with +1
       momentum = 1;
@@ -400,7 +366,7 @@ export async function calculateDailyHabitMomentum(
     if (previousRecord) {
       // If momentum was already negative, decrease it further
       if (previousRecord.momentum < 0) {
-        momentum = Math.max(previousRecord.momentum - 1, -30); // Cap at -30
+        momentum = Math.max(previousRecord.momentum - 1, -3); // Cap at -3
       } else {
         // If momentum was positive or zero, reset to 0
         momentum = 0;
@@ -419,124 +385,75 @@ export async function calculateWeeklyHabitMomentum(
 ): Promise<number> {
   const db = getDb();
   
-  // Get all records for this habit in the current week
-  const weekRecords = await db
+  // OPTIMIZATION: Batch fetch all needed data in one query
+  // Get current week + previous week + any records before current week in one go
+  const previousWeekEnd = new Date(weekStartDate);
+  previousWeekEnd.setDate(previousWeekEnd.getDate() - 1);
+  const previousWeekStart = new Date(previousWeekEnd);
+  previousWeekStart.setDate(previousWeekStart.getDate() - 6);
+  
+  const earliestDate = formatDateYYYYMMDD(previousWeekStart);
+  
+  // Single query to get all relevant records
+  const allRecords = await db
     .select()
     .from(habitRecords)
     .where(
       and(
         eq(habitRecords.habitId, habit.id),
-        gte(habitRecords.date, weekStartDate),
+        gte(habitRecords.date, earliestDate),
         lte(habitRecords.date, weekEndDate)
       )
-    );
+    )
+    .orderBy(desc(habitRecords.date));
   
-  // Count total completions for the week - sum the actual completed values
-  const completionsThisWeek = weekRecords.reduce((sum, record) => sum + record.completed, 0);
+  // Separate records by week
+  const currentWeekRecords = allRecords.filter(r => r.date >= weekStartDate && r.date <= weekEndDate);
+  const previousWeekRecords = allRecords.filter(r => 
+    r.date >= formatDateYYYYMMDD(previousWeekStart) && r.date <= formatDateYYYYMMDD(previousWeekEnd)
+  );
+  
+  // Count completions for current and previous week
+  const completionsThisWeek = currentWeekRecords.reduce((sum, record) => sum + record.completed, 0);
+  const prevWeekCompletions = previousWeekRecords.reduce((sum, record) => sum + record.completed, 0);
   
   console.log(`Weekly habit "${habit.name}" (${habit.id}): ${completionsThisWeek} completions this week`);
   
   // Find if minimum target was reached
   const targetReached = completionsThisWeek >= (habit.targetCount || 2);
+  const prevWeekTargetReached = prevWeekCompletions >= (habit.targetCount || 2);
   
   // Base momentum calculation - ALWAYS add actual completion count
   let momentum = completionsThisWeek;
   
   if (targetReached) {
     // Target reached - add significant bonus
-    // This ensures the momentum is always at least 10 + number of completions when target is met
     momentum += 10;
     console.log(`Momentum after target bonus: ${momentum}`);
     
-    // Check for consecutive weekly successes
-    const previousWeekEnd = new Date(weekStartDate);
-    previousWeekEnd.setDate(previousWeekEnd.getDate() - 1);
-    const previousWeekStart = new Date(previousWeekEnd);
-    previousWeekStart.setDate(previousWeekStart.getDate() - 6);
-    
-    const previousWeekFormatted = {
-      start: formatDateYYYYMMDD(previousWeekStart),
-      end: formatDateYYYYMMDD(previousWeekEnd)
-    };
-    
-    // Get all records from the previous week
-    const previousWeekRecords = await db
-      .select()
-      .from(habitRecords)
-      .where(
-        and(
-          eq(habitRecords.habitId, habit.id),
-          gte(habitRecords.date, previousWeekFormatted.start),
-          lte(habitRecords.date, previousWeekFormatted.end)
-        )
-      );
-      
-    // Check if previous week also met the target
-    const prevWeekCompletions = previousWeekRecords.reduce((sum, record) => sum + record.completed, 0);
-    const prevWeekTargetReached = prevWeekCompletions >= (habit.targetCount || 2);
-    
     if (prevWeekTargetReached) {
       // If previous week also reached target (consecutive success)
-      // Add another significant bonus to create a compounding effect
       momentum = Math.min(momentum + 10, 40); // Cap at +40
       console.log(`Momentum after consecutive bonus: ${momentum}`);
     }
   } else if (completionsThisWeek >= 1) {
     // At least one tracking but didn't reach the target
-    // No additional logic needed - momentum is already set to completionsThisWeek above
-    // This ensures each tracking counts as +1 regardless of target
     console.log(`Momentum without target reached: ${momentum}`);
   } else {
-    // No completions this week - reset momentum to 0 and potentially decrease
-    // Get previous week's record to determine consecutive misses
-    const previousWeekEnd = new Date(weekStartDate);
-    previousWeekEnd.setDate(previousWeekEnd.getDate() - 1);
-    const previousWeekStart = new Date(previousWeekEnd);
-    previousWeekStart.setDate(previousWeekStart.getDate() - 6);
-    
-    const previousWeekFormatted = {
-      start: formatDateYYYYMMDD(previousWeekStart),
-      end: formatDateYYYYMMDD(previousWeekEnd)
-    };
-    
-    // Get records from previous week
-    const previousWeekRecords = await db
-      .select()
-      .from(habitRecords)
-      .where(
-        and(
-          eq(habitRecords.habitId, habit.id),
-          gte(habitRecords.date, previousWeekFormatted.start),
-          lte(habitRecords.date, previousWeekFormatted.end)
-        )
-      );
-    
-    const previousWeekCompletions = previousWeekRecords.reduce((sum, record) => sum + record.completed, 0);
-    
-    if (previousWeekCompletions === 0) {
-      // Find the last record before this week to check momentum
-      const lastRecord = await db
-        .select()
-        .from(habitRecords)
-        .where(
-          and(
-            eq(habitRecords.habitId, habit.id),
-            lt(habitRecords.date, weekStartDate)
-          )
-        )
-        .orderBy(desc(habitRecords.date))
-        .limit(1);
+    // No completions this week - check for consecutive misses
+    if (prevWeekCompletions === 0) {
+      // Find the last record before this week to check momentum (should be in allRecords)
+      const recordsBeforeWeek = allRecords.filter(r => r.date < weekStartDate);
       
-      if (lastRecord.length > 0 && lastRecord[0].momentum < 0) {
+      if (recordsBeforeWeek.length > 0 && recordsBeforeWeek[0].momentum < 0) {
         // If previous momentum was already negative, decrease it further (consecutive misses)
-        momentum = Math.max(lastRecord[0].momentum - 10, -40); // Cap at -40 with -10 decrements
+        momentum = Math.max(recordsBeforeWeek[0].momentum - 10, -30); // Cap at -30 with -10 decrements
       } else {
         // First miss or no previous record - reset to 0 for the first miss
         momentum = 0;
       }
     } else {
-      // Previous week had completions but this week has none
-      // Reset to 0 according to requirements
+      // Previous week had completions but this week has none - reset to 0
       momentum = 0;
     }
   }
@@ -552,8 +469,7 @@ export async function getUserTotalMomentum(userId: string): Promise<number> {
   const today = getCurrentDateYYYYMMDD();
   console.log(`Calculating total momentum for today ${today} in week ${currentWeek.start} to ${currentWeek.end}`);
   
-  // Import the inArray operator
-  const { inArray } = await import('drizzle-orm');
+  // inArray is now imported at module level
   
   // Track separate components to help with debugging
   let dailyMomentum = 0;
@@ -604,23 +520,31 @@ export async function getUserTotalMomentum(userId: string): Promise<number> {
     if (habitRecords.length > 0) {
       // Add up all positive momentum values
       const habitMomentum = habitRecords
-        .filter(record => record.momentum > 0)
-        .reduce((sum, record) => sum + record.momentum, 0);
+        .filter((record: HabitRecord) => record.momentum > 0)
+        .reduce((sum: number, record: HabitRecord) => sum + record.momentum, 0);
       
       dailyMomentum += habitMomentum;
       console.log(`Habit "${habit.name}" accumulated momentum: ${habitMomentum}`);
     } else {
-      // No records for this habit, check if we should preserve streak from yesterday
+      // Check yesterday's records in batch (already fetched above if within 7-day window)
+      // If no records in last 7 days, fetch yesterday specifically
       const yesterday = new Date(today);
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayFormatted = formatDateYYYYMMDD(yesterday);
       
-      const previousRecord = await getHabitRecordForDate(habit.id, yesterdayFormatted);
-      
-      if (previousRecord && previousRecord.completed > 0 && previousRecord.momentum > 0) {
-        dailyMomentum += previousRecord.momentum;
-        console.log(`Adding ${previousRecord.momentum} points to daily momentum from habit "${habit.name}" - preserved streak from yesterday`);
+      // Check if yesterday was within our already-fetched range
+      if (yesterdayFormatted >= sevenDaysAgoStr) {
+        // Yesterday's record should be in our already-fetched data
+        const yesterdayRecord = dailyHabitRecords.find(r => 
+          r.habitId === habit.id && r.date === yesterdayFormatted
+        );
+        
+        if (yesterdayRecord && yesterdayRecord.completed > 0 && yesterdayRecord.momentum > 0) {
+          dailyMomentum += yesterdayRecord.momentum;
+          console.log(`Adding ${yesterdayRecord.momentum} points to daily momentum from habit "${habit.name}" - preserved streak from yesterday`);
+        }
       }
+      // If yesterday is outside our 7-day window, we don't need to check it for momentum preservation
     }
   }
   
@@ -695,8 +619,7 @@ export async function getMomentumHistory(userId: string, days: number = 30): Pro
   
   console.log(`Calculating momentum history from ${startDateStr} to ${endDateStr}`);
   
-  // Import the inArray operator directly for proper query building
-  const { inArray } = await import('drizzle-orm');
+  // inArray is now imported at module level
   
   // OPTIMIZATION: Pre-fetch all habits for this user once
   const [dailyHabits, weeklyHabits] = await Promise.all([
@@ -747,9 +670,15 @@ export async function getMomentumHistory(userId: string, days: number = 30): Pro
     recordsByHabitId.set(record.habitId, habitRecords);
   });
   
-  // Debug log for habit record counts
+  // OPTIMIZATION: Create habit lookup map to avoid O(n²) complexity
+  const habitLookup = new Map<string, Habit>();
+  [...dailyHabits, ...weeklyHabits].forEach(habit => {
+    habitLookup.set(habit.id, habit);
+  });
+  
+  // Debug log for habit record counts (optimized)
   allHabitIds.forEach(id => {
-    const habit = [...dailyHabits, ...weeklyHabits].find(h => h.id === id);
+    const habit = habitLookup.get(id);
     const records = recordsByHabitId.get(id) || [];
     console.log(`Habit "${habit?.name}" (${id}) has ${records.length} records, type: ${habit?.type}`);
   });
@@ -927,7 +856,6 @@ export async function getDailyHabitMomentumForDate(
   date: string,
   completed: number = 0
 ): Promise<number> {
-  const db = getDb();
   
   // If completed, use the standard momentum calculation
   if (completed > 0) {

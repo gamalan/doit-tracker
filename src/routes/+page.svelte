@@ -5,6 +5,30 @@
   $: session = $page.data.session;
 </script>
 
+<svelte:head>
+  <title>DoIt Tracker - A guilt-free habit tracker with momentum-based scoring</title>
+  <meta name="description" content="Build lasting habits with DoIt Tracker's momentum system. Track daily and weekly habits, get rewarded for consistency, and forgive occasional misses. Focus on progress, not perfection." />
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://doit.empat.id/" />
+  <meta property="og:title" content="DoIt Tracker - A guilt-free habit tracker" />
+  <meta property="og:description" content="Build lasting habits with our momentum system. Track daily and weekly habits, get rewarded for consistency, and forgive occasional misses." />
+  <meta property="og:image" content="https://doit.empat.id/og-image.svg" />
+  
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image" />
+  <meta property="twitter:url" content="https://doit.empat.id/" />
+  <meta property="twitter:title" content="DoIt Tracker - A guilt-free habit tracker" />
+  <meta property="twitter:description" content="Build lasting habits with our momentum system. Track daily and weekly habits, get rewarded for consistency, and forgive occasional misses." />
+  <meta property="twitter:image" content="https://doit.empat.id/og-image.svg" />
+  
+  <!-- Additional SEO -->
+  <meta name="keywords" content="habit tracker, momentum scoring, daily habits, weekly habits, productivity, self-improvement, goal tracking, habit building" />
+  <meta name="author" content="DoIt Tracker" />
+  <link rel="canonical" href="https://doit.empat.id/" />
+</svelte:head>
+
 <div class="min-h-screen bg-gradient-to-b from-indigo-50 to-white">
   <!-- Hero Section -->
   <section class="pt-20 pb-16 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">

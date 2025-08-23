@@ -1,0 +1,91 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Gradient -->
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="card-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.95" />
+      <stop offset="100%" style="stop-color:#f8fafc;stop-opacity:0.9" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1200" height="630" fill="url(#bg-gradient)"/>
+  
+  <!-- Decorative circles -->
+  <circle cx="100" cy="100" r="40" fill="rgba(255,255,255,0.1)"/>
+  <circle cx="1100" cy="530" r="60" fill="rgba(255,255,255,0.1)"/>
+  <circle cx="1050" cy="80" r="25" fill="rgba(255,255,255,0.15)"/>
+  
+  <!-- Main content card -->
+  <rect x="100" y="120" width="1000" height="390" rx="20" fill="url(#card-gradient)" stroke="rgba(255,255,255,0.2)" stroke-width="2"/>
+  
+  <!-- Clock Icon (Habit Tracker Symbol) -->
+  <g transform="translate(180, 200)">
+    <!-- Clock circle -->
+    <circle cx="75" cy="75" r="65" fill="none" stroke="#6366f1" stroke-width="6"/>
+    <circle cx="75" cy="75" r="55" fill="none" stroke="#e5e7eb" stroke-width="2"/>
+    
+    <!-- Clock hands -->
+    <line x1="75" y1="75" x2="75" y2="35" stroke="#6366f1" stroke-width="4" stroke-linecap="round"/>
+    <line x1="75" y1="75" x2="105" y2="75" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+    
+    <!-- Clock center dot -->
+    <circle cx="75" cy="75" r="4" fill="#6366f1"/>
+    
+    <!-- Clock numbers (12, 3, 6, 9) -->
+    <text x="75" y="25" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#6366f1">12</text>
+    <text x="115" y="80" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#6366f1">3</text>
+    <text x="75" y="135" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#6366f1">6</text>
+    <text x="35" y="80" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#6366f1">9</text>
+    
+    <!-- Checkmark overlay -->
+    <circle cx="110" cy="40" r="15" fill="#10b981"/>
+    <path d="M105 40 L108 43 L115 36" stroke="white" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </g>
+  
+  <!-- Title Text -->
+  <text x="400" y="240" font-family="Arial, sans-serif" font-size="54" font-weight="bold" fill="#1f2937">DoIt Tracker</text>
+  
+  <!-- Subtitle Text -->
+  <text x="400" y="290" font-family="Arial, sans-serif" font-size="28" fill="#6b7280">A guilt-free habit tracker</text>
+  
+  <!-- Feature bullets -->
+  <g transform="translate(400, 320)">
+    <!-- Bullet 1 -->
+    <circle cx="0" cy="15" r="4" fill="#10b981"/>
+    <text x="15" y="20" font-family="Arial, sans-serif" font-size="18" fill="#374151">Momentum-based scoring system</text>
+    
+    <!-- Bullet 2 -->
+    <circle cx="0" cy="45" r="4" fill="#10b981"/>
+    <text x="15" y="50" font-family="Arial, sans-serif" font-size="18" fill="#374151">Daily &amp; weekly habit tracking</text>
+    
+    <!-- Bullet 3 -->
+    <circle cx="0" cy="75" r="4" fill="#10b981"/>
+    <text x="15" y="80" font-family="Arial, sans-serif" font-size="18" fill="#374151">Focus on progress, not perfection</text>
+  </g>
+  
+  <!-- Momentum visualization -->
+  <g transform="translate(850, 200)">
+    <!-- Progress bars -->
+    <rect x="0" y="0" width="200" height="12" rx="6" fill="#e5e7eb"/>
+    <rect x="0" y="0" width="160" height="12" rx="6" fill="#10b981"/>
+    <text x="210" y="10" font-family="Arial, sans-serif" font-size="14" fill="#374151">+25 momentum</text>
+    
+    <rect x="0" y="25" width="200" height="12" rx="6" fill="#e5e7eb"/>
+    <rect x="0" y="25" width="120" height="12" rx="6" fill="#6366f1"/>
+    <text x="210" y="35" font-family="Arial, sans-serif" font-size="14" fill="#374151">+18 momentum</text>
+    
+    <rect x="0" y="50" width="200" height="12" rx="6" fill="#e5e7eb"/>
+    <rect x="0" y="50" width="80" height="12" rx="6" fill="#f59e0b"/>
+    <text x="210" y="60" font-family="Arial, sans-serif" font-size="14" fill="#374151">+12 momentum</text>
+    
+    <!-- Label -->
+    <text x="0" y="85" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#6b7280">Habit Progress</text>
+  </g>
+  
+  <!-- Website URL -->
+  <text x="600" y="570" text-anchor="middle" font-family="Arial, sans-serif" font-size="20" font-weight="medium" fill="rgba(255,255,255,0.9)">doit.empat.id</text>
+</svg>

@@ -123,34 +123,148 @@ npm run test:coverage
 
 ## 📦 Deployment
 
-### Cloudflare Workers Deployment
+### Prerequisites
 
-1. **Authenticate with Cloudflare**
-   ```bash
-   npx wrangler login
+1. **Cloudflare Account**: Create account at [cloudflare.com](https://cloudflare.com)
+2. **Wrangler CLI**: Installed automatically with `npm install`
+3. **Google OAuth App**: Set up at [Google Cloud Console](https://console.cloud.google.com)
+
+### Step-by-Step Deployment
+
+#### 1. Configure Environment
+
+```bash
+# Copy example config
+cp wrangler.jsonc.example wrangler.jsonc
+
+# Edit wrangler.jsonc with your details:
+# - Replace "your-d1-database-name" with actual DB name
+# - Update account_id and compatibility_date
+```
+
+#### 2. Authenticate with Cloudflare
+
+```bash
+npx wrangler login
+```
+
+#### 3. Create D1 Database
+
+```bash
+# Create new D1 database
+npx wrangler d1 create doit-tracker-db
+
+# Update wrangler.jsonc with the database_id from output
+```
+
+#### 4. Run Database Migrations
+
+```bash
+# Apply database schema
+npx wrangler d1 execute doit-tracker-db --file=./src/lib/db/migrations.sql
+
+# Apply performance indexes (recommended for production)
+npx wrangler d1 execute doit-tracker-db --file=./src/lib/db/migrations-performance.sql
+```
+
+#### 5. Set Environment Secrets
+
+```bash
+# Generate random AUTH_SECRET (32+ characters)
+npx wrangler secret put AUTH_SECRET
+
+# Add Google OAuth credentials
+npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+```
+
+#### 6. Build and Deploy
+
+```bash
+# Build the app
+npm run build
+
+# Deploy to Cloudflare Workers
+npm run deploy
+```
+
+#### 7. Verify Deployment
+
+```bash
+# Check deployment status
+npx wrangler deployments list
+
+# Test cron job manually
+curl https://your-app.your-subdomain.workers.dev/api/cron/daily-missed
+
+# View live app
+echo "Visit: https://your-app.your-subdomain.workers.dev"
+```
+
+### Google OAuth Setup
+
+1. **Create OAuth App**:
+   - Go to [Google Cloud Console](https://console.cloud.google.com)
+   - Create new project or select existing
+   - Enable Google+ API
+
+2. **Configure OAuth**:
+   ```
+   Authorized origins: https://your-app.your-subdomain.workers.dev
+   Authorized redirect: https://your-app.your-subdomain.workers.dev/auth/callback/google
    ```
 
-2. **Deploy to production**
-   ```bash
-   npm run deploy
-   ```
-
-3. **Verify cron jobs are active**
-   ```bash
-   npx wrangler deployments list
-   ```
+3. **Get Credentials**:
+   - Copy Client ID and Client Secret
+   - Add them using `wrangler secret put`
 
 ### Environment Configuration
 
-The app requires these environment variables:
+Required environment variables:
 
-- `AUTH_SECRET`: Random string for session encryption
-- `GOOGLE_CLIENT_ID`: Google OAuth client ID
+- `AUTH_SECRET`: Random 32+ character string for session encryption
+- `GOOGLE_CLIENT_ID`: Google OAuth client ID  
 - `GOOGLE_CLIENT_SECRET`: Google OAuth client secret
 
-### Database Setup
+### Database Management
 
-The app uses Cloudflare D1 database. Migration is handled automatically on deployment.
+```bash
+# View database schema
+npx wrangler d1 execute doit-tracker-db --command="SELECT name FROM sqlite_master WHERE type='table';"
+
+# View indexes
+npx wrangler d1 execute doit-tracker-db --command="SELECT name FROM sqlite_master WHERE type='index';"
+
+# Query data
+npx wrangler d1 execute doit-tracker-db --command="SELECT * FROM users LIMIT 5;"
+
+# Backup database
+npx wrangler d1 export doit-tracker-db --output=backup.sql
+
+# Apply performance migrations to existing database
+npx wrangler d1 execute doit-tracker-db --file=./src/lib/db/migrations-performance.sql
+```
+
+### Troubleshooting Deployment
+
+**Build Errors:**
+```bash
+npm run check    # Check TypeScript
+npm run lint     # Check code style
+npm run build    # Test build
+```
+
+**Deployment Fails:**
+- Verify `wrangler.jsonc` database_id matches D1 database
+- Check account_id is correct
+- Ensure all secrets are set
+
+**Cron Jobs Not Working:**
+```bash
+# Check cron triggers in wrangler.jsonc
+# Verify deployment with: npx wrangler deployments list
+# Test manually: GET /api/cron/daily-missed
+```
 
 ## 🔧 Configuration
 

@@ -49,7 +49,7 @@ export const handle = sequence(
 );
 
 // Cloudflare Workers scheduled event handler
-/*export async function scheduled(event: any, env: any, ctx: any) {
+const scheduledHandler = async (event: any, env: any, ctx: any) => {
   console.log('Scheduled event triggered:', event.cron);
   
   try {
@@ -79,4 +79,7 @@ export const handle = sequence(
     console.error('Error in scheduled event handler:', error);
     throw error;
   }
-}*/
+};
+
+// Export the scheduled handler
+export const scheduled = scheduledHandler;

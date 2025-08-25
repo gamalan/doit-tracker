@@ -4,7 +4,7 @@
 	"version": "0.0.1",
 	"type": "module",
 	"scripts": {
-		"build": "vite build",
+		"build": "vite build && node add-scheduled.js",
 		"dev": "npm run build && wrangler dev",
 		"preview": "npm run build && wrangler dev",
 		"prepare": "svelte-kit sync || echo ''",

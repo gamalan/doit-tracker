@@ -1,6 +1,6 @@
 import { getDb } from '../db/client';
 import { habits, habitRecords } from '../db/schema';
-import { eq, and, sql, lt, gte, lte } from 'drizzle-orm';
+import { eq, and, sql, lt, gte, lte, desc } from 'drizzle-orm';
 import { formatDateYYYYMMDD, createOrUpdateHabitRecord, getDateRangeForWeek, calculateWeeklyHabitMomentum } from '../habits';
 
 /**
@@ -56,16 +56,53 @@ export async function processDailyMissedHabits(): Promise<{ processed: number; e
           // No record exists for yesterday - this is a missed day
           console.log(`Missed daily habit: ${habit.habitName} (${habit.habitId}) for user ${habit.userId}`);
           
-          // Create a record with completed=0 to trigger penalty logic
+          // Calculate appropriate momentum penalty based on previous record
+          let momentumPenalty = 0;
+          
+          // Get the most recent record before yesterday to determine penalty
+          const previousRecord = await db
+            .select()
+            .from(habitRecords)
+            .where(
+              and(
+                eq(habitRecords.habitId, habit.habitId),
+                lt(habitRecords.date, yesterdayStr)
+              )
+            )
+            .orderBy(desc(habitRecords.date))
+            .limit(1);
+          
+          const lastRecord = previousRecord[0];
+          
+          if (lastRecord) {
+            const previousMomentum = lastRecord.momentum || 0;
+            
+            if (previousMomentum > 0) {
+              // Had positive momentum - first miss resets to 0
+              momentumPenalty = 0;
+              console.log(`Resetting positive momentum ${previousMomentum} to 0 for first missed day`);
+            } else {
+              // Already had zero or negative momentum - decrease by 1 (consecutive miss)
+              momentumPenalty = Math.max(previousMomentum - 1, -3); // Cap at -3
+              console.log(`Decreasing negative momentum from ${previousMomentum} to ${momentumPenalty} for consecutive miss`);
+            }
+          } else {
+            // No previous record - set to 0 for first miss
+            momentumPenalty = 0;
+            console.log(`No previous record found, setting momentum to 0 for missed day`);
+          }
+          
+          // Create a record with calculated momentum penalty
           await createOrUpdateHabitRecord({
             habitId: habit.habitId,
             userId: habit.userId,
             date: yesterdayStr,
-            completed: 0
+            completed: 0,
+            momentum: momentumPenalty
           });
           
           processed++;
-          console.log(`Applied penalty for missed habit: ${habit.habitName}`);
+          console.log(`Applied penalty for missed habit: ${habit.habitName}, momentum: ${momentumPenalty}`);
         }
       } catch (error) {
         console.error(`Error processing habit ${habit.habitId}:`, error);
@@ -154,7 +191,13 @@ export async function processWeeklyMissedHabits(): Promise<{ processed: number; 
           const habitData = {
             id: habit.habitId,
             name: habit.habitName,
-            targetCount: habit.targetCount || 2
+            targetCount: habit.targetCount || 2,
+            createdAt: null,
+            userId: habit.userId,
+            description: null,
+            type: 'weekly' as const,
+            accumulatedMomentum: null,
+            archivedAt: null
           };
           
           const newMomentum = await calculateWeeklyHabitMomentum(

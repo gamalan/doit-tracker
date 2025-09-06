@@ -87,9 +87,32 @@ export async function processDailyMissedHabits(): Promise<{ processed: number; e
               console.log(`Decreasing negative momentum from ${previousMomentum} to ${momentumPenalty} for consecutive miss`);
             }
           } else {
-            // No previous record - set to 0 for first miss
-            momentumPenalty = 0;
-            console.log(`No previous record found, setting momentum to 0 for missed day`);
+            // No previous record - check if this is part of consecutive missed days
+            // Look for any missed day records created by cron job
+            const missedDayRecords = await db
+              .select()
+              .from(habitRecords)
+              .where(
+                and(
+                  eq(habitRecords.habitId, habit.habitId),
+                  eq(habitRecords.completed, 0),
+                  lt(habitRecords.date, yesterdayStr)
+                )
+              )
+              .orderBy(desc(habitRecords.date))
+              .limit(1);
+            
+            const lastMissedRecord = missedDayRecords[0];
+            
+            if (lastMissedRecord) {
+              // There was a previous missed day - continue the negative momentum
+              momentumPenalty = Math.max((lastMissedRecord.momentum || 0) - 1, -3);
+              console.log(`Continuing negative momentum from ${lastMissedRecord.momentum || 0} to ${momentumPenalty} for consecutive missed day`);
+            } else {
+              // Truly no previous records at all - start with 0 for first miss
+              momentumPenalty = 0;
+              console.log(`No previous record found, setting momentum to 0 for first missed day`);
+            }
           }
           
           // Create a record with calculated momentum penalty

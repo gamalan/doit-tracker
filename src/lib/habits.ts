@@ -448,8 +448,11 @@ export async function calculateWeeklyHabitMomentum(
       if (recordsBeforeWeek.length > 0 && recordsBeforeWeek[0].momentum < 0) {
         // If previous momentum was already negative, decrease it further (consecutive misses)
         momentum = Math.max(recordsBeforeWeek[0].momentum - 10, -30); // Cap at -30 with -10 decrements
+      } else if (recordsBeforeWeek.length > 0 && recordsBeforeWeek[0].momentum === 0) {
+        // Previous week was also a miss (momentum 0) - apply penalty
+        momentum = -10; // Start with -10 for second consecutive miss
       } else {
-        // First miss or no previous record - reset to 0 for the first miss
+        // First miss ever - start with 0
         momentum = 0;
       }
     } else {

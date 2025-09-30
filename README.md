@@ -10,16 +10,32 @@ A comprehensive habit tracking application with intelligent momentum-based scori
 - **Intelligent Scoring**: Momentum-based system that rewards consistency
 
 ### 📊 Momentum System
-- **Daily Habits**:
-  - Each completion: +1 point
-  - Consecutive days: momentum increases up to +7 maximum
-  - Missing days: reset streak to +1
-  - Consecutive misses: penalty down to -3 minimum
-- **Weekly Habits**:
-  - Each completion: +1 point regardless of target
-  - Target completion: +10 bonus
-  - Consecutive weekly targets: additional +10 bonus (max +40)
-  - Missing weeks: -10 penalty per consecutive miss (min -30)
+
+#### Daily Habits
+- **Base momentum**: Each completion adds +1 to daily momentum
+- **Streak building**: Consecutive completions increase momentum (+2, +3, up to +7 max)
+- **First miss**: Resets positive momentum to 0
+- **Consecutive misses**: Decrease momentum by -1 each day (down to -3 minimum)
+- **Recovery**: Completing after misses resets to +1
+- **Accumulated momentum**: Sum of all daily momentum deltas over time
+
+#### Weekly Habits
+- **Base momentum**: Each completion adds +1 per tracking
+- **Target bonus**: Meeting weekly target adds +10 bonus
+- **Consecutive bonus**: Meeting target 2+ weeks in a row adds additional +10 (max total +40)
+- **Missing target penalty**:
+  - 1st week missing target: No penalty (just base completions)
+  - 2nd consecutive week: -10 penalty
+  - 3rd consecutive week: -20 penalty
+  - 4th+ consecutive weeks: -30 penalty (capped)
+- **Formula**: `momentum = completions + bonuses + penalties`
+- **Example**: 2 completions with target 3 on 3rd consecutive miss = `2 + (-20) = -18`
+- **Accumulated momentum**: Sum of all weekly momentum at week end (updated by cron)
+
+#### Total Momentum Score
+- Sum of accumulated momentum from all active daily and weekly habits
+- Updated in real-time for daily habits (on each tracking)
+- Updated weekly for weekly habits (Monday 1 AM UTC via cron)
 
 ### 🤖 Automated Penalty System
 - **Daily Processing**: Automatically detect missed daily habits every day
@@ -337,16 +353,20 @@ Current momentum caps (defined in `src/lib/habits.ts`):
 ### Momentum Calculation Examples
 
 **Daily Habit Streak:**
-- Day 1: Complete → +1 momentum
-- Day 2: Complete → +2 momentum  
-- Day 3: Complete → +3 momentum
-- Day 4: Miss → Cron resets to 0, then -1 penalty
-- Day 5: Complete → +1 momentum (fresh start)
+- Day 1: Complete → +1 momentum, accumulated = 1
+- Day 2: Complete → +2 momentum, accumulated = 1 + 1 = 2
+- Day 3: Complete → +3 momentum, accumulated = 2 + 1 = 3
+- Day 4: Miss → 0 momentum (reset), accumulated = 3 + (-3) = 0
+- Day 5: Miss → -1 momentum, accumulated = 0 + (-1) = -1
+- Day 6: Complete → +1 momentum (recovery), accumulated = -1 + 2 = 1
 
-**Weekly Habit Scoring:**
-- Week 1: 2 completions, target 2 → 2 + 10 = 12 momentum
-- Week 2: 3 completions, target 2 → 3 + 10 + 10 (consecutive) = 23 momentum
-- Week 3: 0 completions → 0 momentum (reset)
+**Weekly Habit Scoring (Target = 3):**
+- Week 1: 4 completions → 4 + 10 = 14, accumulated = 14
+- Week 2: 4 completions → 4 + 10 + 10 = 24 (consecutive), accumulated = 14 + 24 = 38
+- Week 3: 2 completions (1st miss) → 2, accumulated = 38 + 2 = 40
+- Week 4: 2 completions (2nd miss) → 2 - 10 = -8, accumulated = 40 + (-8) = 32
+- Week 5: 2 completions (3rd miss) → 2 - 20 = -18, accumulated = 32 + (-18) = 14
+- Week 6: 2 completions (4th miss) → 2 - 30 = -28, accumulated = 14 + (-28) = -14
 
 ## 🛠️ Development
 

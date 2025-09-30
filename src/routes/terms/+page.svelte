@@ -11,7 +11,7 @@
 	<h1 class="text-3xl font-bold mb-6">Terms of Service</h1>
 	
 	<div class="prose max-w-none">
-		<p class="mb-4">Last updated: {new Date().toLocaleDateString('en-US', {year: 'numeric', month: 'long', day: 'numeric'})}</p>
+		<p class="mb-4">Last updated: 30 September 2025</p>
 
 		<h2 class="text-xl font-semibold mt-6 mb-3">1. Introduction</h2>
 		<p>Welcome to DoIt Tracker ("we," "our," or "us"). By accessing or using our habit tracking service, you agree to be bound by these Terms of Service ("Terms"). Please read these Terms carefully.</p>

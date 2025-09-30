@@ -11,7 +11,7 @@
 	<h1 class="text-3xl font-bold mb-6">Privacy Policy</h1>
 	
 	<div class="prose max-w-none">
-		<p class="mb-4">Last updated: {new Date().toLocaleDateString('en-US', {year: 'numeric', month: 'long', day: 'numeric'})}</p>
+		<p class="mb-4">Last updated: 30 September 2025</p>
 
 		<h2 class="text-xl font-semibold mt-6 mb-3">1. Introduction</h2>
 		<p>This Privacy Policy explains how DoIt Tracker ("we," "our," or "us") collects, uses, and discloses your information when you use our habit tracking service. Please read this Privacy Policy carefully.</p>

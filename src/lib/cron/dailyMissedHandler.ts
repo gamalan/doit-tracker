@@ -175,7 +175,8 @@ export async function processWeeklyMissedHabits(): Promise<{ processed: number; 
         habitId: habits.id,
         userId: habits.userId,
         habitName: habits.name,
-        targetCount: habits.targetCount
+        targetCount: habits.targetCount,
+        accumulatedMomentum: habits.accumulatedMomentum
       })
       .from(habits)
       .where(
@@ -207,43 +208,56 @@ export async function processWeeklyMissedHabits(): Promise<{ processed: number; 
         const targetMet = totalCompletions >= (habit.targetCount || 2);
         
         console.log(`Weekly habit: ${habit.habitName} had ${totalCompletions}/${habit.targetCount || 2} completions, target met: ${targetMet}`);
-        
+
+        // Calculate the momentum for this completed week
+        const habitData = {
+          id: habit.habitId,
+          name: habit.habitName,
+          targetCount: habit.targetCount || 2,
+          createdAt: null,
+          userId: habit.userId,
+          description: null,
+          type: 'weekly' as const,
+          accumulatedMomentum: habit.accumulatedMomentum,
+          archivedAt: null
+        };
+
+        const weekMomentum = await calculateWeeklyHabitMomentum(
+          habitData,
+          habit.userId,
+          weekStart,
+          weekEnd
+        );
+
+        console.log(`Week momentum for ${habit.habitName}: ${weekMomentum}`);
+
+        // Update accumulated momentum by adding this week's momentum
+        const currentAccumulated = habit.accumulatedMomentum || 0;
+        const newAccumulated = currentAccumulated + weekMomentum;
+
+        await db
+          .update(habits)
+          .set({
+            accumulatedMomentum: newAccumulated
+          })
+          .where(eq(habits.id, habit.habitId));
+
+        console.log(`Updated accumulated momentum for ${habit.habitName}: ${currentAccumulated} + ${weekMomentum} = ${newAccumulated}`);
+
         if (!targetMet) {
-          // Target was not met - need to apply penalty
-          // Calculate the appropriate momentum for this missed week
-          const habitData = {
-            id: habit.habitId,
-            name: habit.habitName,
-            targetCount: habit.targetCount || 2,
-            createdAt: null,
-            userId: habit.userId,
-            description: null,
-            type: 'weekly' as const,
-            accumulatedMomentum: null,
-            archivedAt: null
-          };
-          
-          const newMomentum = await calculateWeeklyHabitMomentum(
-            habitData,
-            habit.userId,
-            weekStart,
-            weekEnd
-          );
-          
-          // Create a record on the last day of the week (Sunday) to represent the week's result
+          // Target was not met - also create a record on Sunday to mark the miss
           await createOrUpdateHabitRecord({
             habitId: habit.habitId,
             userId: habit.userId,
             date: weekEnd,
             completed: 0,
-            momentum: newMomentum
+            momentum: weekMomentum
           });
-          
-          processed++;
-          console.log(`Applied penalty for missed weekly target: ${habit.habitName}, momentum: ${newMomentum}`);
-        } else {
-          console.log(`Weekly habit ${habit.habitName} met target, no penalty needed`);
+          console.log(`Created miss record for ${habit.habitName} on ${weekEnd}`);
         }
+
+        processed++;
+        console.log(`Processed weekly habit: ${habit.habitName}, week momentum: ${weekMomentum}`);
         
       } catch (error) {
         console.error(`Error processing weekly habit ${habit.habitId}:`, error);

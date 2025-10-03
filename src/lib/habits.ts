@@ -496,17 +496,34 @@ export async function calculateWeeklyHabitMomentum(
 export async function getUserTotalMomentum(userId: string): Promise<number> {
 	console.log(`Calculating total momentum using the same logic as momentum history`);
 
-	// Get momentum history for today (or the most recent day)
-	const momentumHistory = await getMomentumHistory(userId, 1);
+	// Get momentum history for the last 30 days to ensure we have data
+	const momentumHistory = await getMomentumHistory(userId, 30);
 
 	if (momentumHistory.length === 0) {
 		console.log(`No momentum history found, returning 0`);
 		return 0;
 	}
 
-	// Return the most recent momentum value
+	// Return the most recent momentum value (last entry in the array)
 	const totalMomentum = momentumHistory[momentumHistory.length - 1].momentum;
-	console.log(`Total momentum from history: ${totalMomentum}`);
+	console.log(`Total momentum from history (${momentumHistory.length} days): ${totalMomentum}`);
+	console.log(
+		`Last momentum entry:`,
+		JSON.stringify(momentumHistory[momentumHistory.length - 1], null, 2)
+	);
+
+	// Also check what the old calculation would return for comparison
+	const db = getDb();
+	const [dailyHabits, weeklyHabits] = await Promise.all([
+		getUserHabits(userId, 'daily'),
+		getUserHabits(userId, 'weekly')
+	]);
+
+	let oldCalculation = 0;
+	for (const habit of [...dailyHabits, ...weeklyHabits]) {
+		oldCalculation += habit.accumulatedMomentum || 0;
+	}
+	console.log(`Old calculation from accumulatedMomentum: ${oldCalculation}`);
 
 	return totalMomentum;
 }
@@ -548,29 +565,15 @@ export async function getMomentumHistory(
 		return [];
 	}
 
-	// OPTIMIZATION: Fetch all relevant habit records in a single query
-	// Include records from before the start date to properly calculate weekly momentum
-	// We need to get records from at most 14 days before the start date to account for weekly habits across multiple weeks
-	const extendedStartDate = new Date(startDate);
-	extendedStartDate.setDate(extendedStartDate.getDate() - 14); // Expand to 14 days prior to catch more weekly records
-	const extendedStartDateStr = formatDateYYYYMMDD(extendedStartDate);
-
-	// Use proper inArray operator instead of SQL template string
+	// FIX: Get ALL records for each habit from the beginning to properly calculate cumulative momentum
+	// This ensures we include momentum accumulated before the 30-day window
 	const allHabitRecords = await db
 		.select()
 		.from(habitRecords)
-		.where(
-			and(
-				eq(habitRecords.userId, userId),
-				gte(habitRecords.date, extendedStartDateStr),
-				lte(habitRecords.date, endDateStr),
-				inArray(habitRecords.habitId, allHabitIds)
-			)
-		);
+		.where(and(eq(habitRecords.userId, userId), inArray(habitRecords.habitId, allHabitIds)))
+		.orderBy(habitRecords.date);
 
-	console.log(
-		`Found ${allHabitRecords.length} habit records in extended date range ${extendedStartDateStr} to ${endDateStr}`
-	);
+	console.log(`Found ${allHabitRecords.length} total habit records for all time`);
 
 	// Group records by habit ID for easier processing
 	const recordsByHabitId = new Map<string, HabitRecord[]>();
@@ -652,6 +655,14 @@ export async function getMomentumHistory(
 	dailyHabits.forEach((habit) => dailyHabitAccumulated.set(habit.id, 0));
 	weeklyHabits.forEach((habit) => weeklyHabitAccumulated.set(habit.id, 0));
 
+	weeklyHabits.forEach((habit) => {
+		const currentAccumulated = habit.accumulatedMomentum || 0;
+		weeklyHabitAccumulated.set(habit.id, currentAccumulated);
+		console.log(
+			`[History] Initializing weekly habit "${habit.name}" with accumulated momentum: ${currentAccumulated}`
+		);
+	});
+
 	// Track which weeks we've already processed for weekly habits
 	const processedWeeks = new Map<string, Set<string>>(); // habitId -> Set of week start dates
 	weeklyHabits.forEach((habit) => processedWeeks.set(habit.id, new Set()));
@@ -667,7 +678,8 @@ export async function getMomentumHistory(
 			const key = `${habit.id}_${dateStr}`;
 			const todayRecord = recordsByHabitAndDate.get(key);
 
-			if (todayRecord) {
+			// Only process if this record is within our date range
+			if (todayRecord && todayRecord.date >= startDateStr && todayRecord.date <= endDateStr) {
 				// We have a record for this date - apply the delta
 				// Get previous day's record to calculate delta
 				const prevDate = new Date(dateStr);
@@ -704,8 +716,12 @@ export async function getMomentumHistory(
 		for (const habit of weeklyHabits) {
 			const habitWeeksProcessed = processedWeeks.get(habit.id)!;
 
-			// Check if we've already processed this week for this habit
-			if (!habitWeeksProcessed.has(weekKey)) {
+			// Check if we've already processed this week for this habit AND if this week falls within our date range
+			if (
+				!habitWeeksProcessed.has(weekKey) &&
+				currentWeek.start <= endDateStr &&
+				currentWeek.end >= startDateStr
+			) {
 				// First time seeing this week - calculate and add its momentum
 				habitWeeksProcessed.add(weekKey);
 
